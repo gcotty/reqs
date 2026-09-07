@@ -78,7 +78,7 @@ function isRequestBody(value: unknown): value is RequestBody {
   }
 }
 
-function validateRequst(value: unknown): RequestDefinition {
+export function validateRequest(value: unknown): RequestDefinition {
   if (!isObject(value)) {
     throw new Error("Request must be a JSON object");
   }
