@@ -1,0 +1,184 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const cliPath = fileURLToPath(new URL("./cli.js", import.meta.url));
+
+interface CliResult {
+  exitCode: number | null;
+  stdout: Buffer;
+  stderr: string;
+}
+
+function runCli(args: string[]): Promise<CliResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+    });
+
+    child.once("error", reject);
+
+    child.once("close", (exitCode, signal) => {
+      if (signal !== null) {
+        reject(new Error(`CLI terminated with signal ${signal}`));
+        return;
+      }
+
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
+      });
+    });
+  });
+}
+
+async function createTempDirectory(
+  context: TestContext,
+): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "reqs-cli-"));
+
+  context.after(() =>
+    rm(directory, {
+      recursive: true,
+      force: true,
+    }),
+  );
+
+  return directory;
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(error);
+      }
+    });
+  });
+}
+
+async function startServer(
+  context: TestContext,
+  statusCode: number,
+  responseBody: Uint8Array,
+): Promise<number> {
+  const server = createServer((_request, response) => {
+    response.writeHead(statusCode, {
+      "Content-Type": "application/octet-stream",
+    });
+    response.end(responseBody);
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  return address.port;
+}
+
+test("reports a missing request-file argument", async () => {
+  const result = await runCli(["run"]);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout.length, 0);
+  assert.equal(result.stderr, "Usage: reqs run <file>\n");
+});
+
+test("reports an invalid request definition", async (context) => {
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "invalid-request.json");
+
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 2,
+      method: "GET",
+      url: "https://example.com",
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", filePath]);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout.length, 0);
+  assert.match(
+    result.stderr,
+    /Failed to run request: Request version must be 1/,
+  );
+});
+
+test("writes response bytes to stdout and status to stderr", async (context) => {
+  const responseBody = new Uint8Array([0x00, 0x7f, 0xff]);
+  const port = await startServer(context, 200, responseBody);
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "request.json");
+
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${port}/users`,
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", filePath]);
+
+  assert.equal(result.exitCode, 0);
+  assert.deepStrictEqual(result.stdout, Buffer.from(responseBody));
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+});
+
+test("returns exit code 1 while preserving an HTTP error body", async (context) => {
+  const responseBody = Buffer.from("not found", "utf8");
+  const port = await startServer(context, 404, responseBody);
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "missing.json");
+
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${port}/missing`,
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", filePath]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout.toString("utf8"), "not found");
+  assert.match(result.stderr, /^404 Not Found \(\d+ ms\)\n$/);
+});
