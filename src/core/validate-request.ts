@@ -3,7 +3,7 @@ import type {
   JsonValue,
   RequestBody,
   RequestDefinition,
-} from "./request.ts";
+} from "./request.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
