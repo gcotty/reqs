@@ -23,10 +23,12 @@ Inspected on 2026-09-11:
 
 | File | Current behavior |
 | --- | --- |
-| `package.json` | Private ESM package; `reqs` bin points to `dist/cli.js`; build, typecheck, and test scripts |
+| `package.json` | Private ESM package; `reqs` bin points to `dist/cli.js`; includes build, repo-local CLI, typecheck, and test scripts |
 | `pnpm-lock.yaml` | Committed dependency lockfile |
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
-| `.gitignore` | Ignores dependencies, build output, local history, and environment files; allows `.env.example` |
+| `.gitignore` | Ignores dependencies, build output, local history, environment files, and the local personal `requests/` directory; allows `.env.example` |
+| `README.md` | Documents setup, repo-local CLI usage, the tracked live example, personal request storage, request shapes, limitations, and development checks |
+| `examples/get-httpbin.json` | Tracked credential-free GET example against the public httpbin echo service |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
 | `src/cli.ts` | Help and unknown-command handling; `run <file>` loads, validates, and executes a request, writes body bytes to stdout, and writes status and timing to stderr |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
@@ -38,6 +40,8 @@ Inspected on 2026-09-11:
 | `src/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, stdout/stderr separation, HTTP exit status, binary output, and relative file bodies end to end |
 
 `pnpm typecheck`, `pnpm build`, and the complete test command completed successfully at this checkpoint. Four test files declare 18 passing tests covering validation, loading, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+
+The documented example was also run successfully through the compiled CLI against httpbin. This is a manual usage check only; automated tests remain independent of the public service.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 

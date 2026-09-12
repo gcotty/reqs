@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "reqs": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --test dist/*.test.js dist/core/*.test.js"
   },

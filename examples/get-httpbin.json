@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "method": "GET",
+  "url": "https://httpbin.org/anything",
+  "query": {
+    "source": "reqs-example",
+    "include": ["headers", "url"]
+  },
+  "headers": {
+    "Accept": "application/json",
+    "X-Reqs-Example": "true"
+  }
+}
