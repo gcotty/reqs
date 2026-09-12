@@ -182,3 +182,66 @@ test("returns exit code 1 while preserving an HTTP error body", async (context) 
   assert.equal(result.stdout.toString("utf8"), "not found");
   assert.match(result.stderr, /^404 Not Found \(\d+ ms\)\n$/);
 });
+
+test("resolves a file body relative to the request file", async (context) => {
+  let receivedBody: Buffer | undefined;
+  let receivedContentType: string | undefined;
+
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+
+    request.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+
+    request.on("end", () => {
+      receivedBody = Buffer.concat(chunks);
+      receivedContentType = request.headers["content-type"];
+
+      response.writeHead(200);
+      response.end("accepted");
+    });
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "request.json");
+  const payloadPath = join(directory, "payload.bin");
+  const payload = Buffer.from([0x00, 0x7f, 0xff]);
+
+  await writeFile(payloadPath, payload);
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 1,
+      method: "POST",
+      url: `http://127.0.0.1:${address.port}/upload`,
+      headers: {
+        "Content-Type": "application/octet-stream",
+      },
+      body: {
+        type: "file",
+        path: "./payload.bin",
+      },
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", filePath]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "accepted");
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+  assert.deepStrictEqual(receivedBody, payload);
+  assert.equal(receivedContentType, "application/octet-stream");
+});

@@ -29,7 +29,9 @@ async function main(): Promise<void> {
     try {
       const input = await loadRequestJson(filePath);
       const request = validateRequest(input);
-      const { response, body, durationMs } = await executeRequest(request);
+      const { response, body, durationMs } = await executeRequest(request, {
+        requestFilePath: filePath,
+      });
 
       process.stdout.write(body);
 

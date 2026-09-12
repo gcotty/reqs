@@ -32,13 +32,16 @@ Inspected on 2026-09-11:
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
 | `src/core/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
-| `src/core/execute-request.ts` | Executes a direct request with Node's built-in `fetch`, applying headers and query values, using a 30-second timeout, disabling automatic redirects, buffering response bytes, and measuring total response time |
+| `src/core/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
+| `src/core/execute-request.ts` | Executes direct requests with headers, query values, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
+| `src/core/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
+| `src/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, stdout/stderr separation, HTTP exit status, binary output, and relative file bodies end to end |
 
-`pnpm typecheck` and `pnpm test` completed successfully at this checkpoint. The runner output summarized one passing test file. Existing tests exercise validation, not loading, HTTP execution, or end-to-end CLI behavior.
+`pnpm typecheck`, `pnpm build`, and the complete test command completed successfully at this checkpoint. Four test files declare 18 passing tests covering validation, loading, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-The initial executor deliberately rejects configured `auth`, `vars`, and `body` fields instead of silently ignoring unsupported features. It currently supports only direct, already-resolved URLs plus headers and query values. All errors caught by `run` currently exit with code 2, including network and timeout failures; separating those failures into the proposed exit codes remains future work.
+The initial executor deliberately rejects configured `auth` and `vars` fields instead of silently ignoring unsupported features. It supports direct, already-resolved URLs; headers; repeated query values; and JSON, text, form, and file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. All errors caught by `run` currently exit with code 2, including network and timeout failures; separating those failures into the proposed exit codes remains future work.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -52,9 +55,9 @@ pnpm test
 node dist/cli.js --help
 ```
 
-`typecheck` runs `tsc --noEmit`. `build` emits JavaScript into ignored local `dist/`. `test` currently builds and runs `node --test dist/core/validate-request.test.js`; expand test discovery when more files are added.
+`typecheck` runs `tsc --noEmit`. `build` emits JavaScript into ignored local `dist/`. `test` builds and runs compiled `*.test.js` files directly under `dist/` and `dist/core/`. The explicit compiled-output patterns prevent recent Node versions from discovering and attempting to execute the TypeScript source tests directly.
 
-TypeScript checks authored code at compile time. It does not validate JSON read from disk. Runtime tests currently pass independent hardcoded objects into the validator; each call to the test helper creates a fresh object. File-loading tests will be separate.
+TypeScript checks authored code at compile time. It does not validate JSON read from disk. Runtime validation remains necessary after loading. Tests use fresh hardcoded values, temporary files and directories, local HTTP servers, and child CLI processes as appropriate to each boundary.
 
 ## Implementation phases
 
@@ -64,15 +67,16 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 - Minimal CLI entry point with help and error exit status.
 - TypeScript concepts: literal types, recursive types, discriminated unions, optional properties, type-only imports.
 
-### 2. First request — in progress
+### 2. First request — working prototype complete
 
 - Implemented: JSON loading and request validation with focused validator tests.
 - Implemented: `run <file>` connects loading, validation, HTTP execution, raw response-body output, status/timing output, and HTTP failure exit status.
 - Implemented: direct URLs, request headers, repeated query values, a finite timeout, disabled redirects, and binary-safe buffered response bodies.
+- Implemented: JSON, text, URL-encoded form, and file request bodies, including default content types and explicit header precedence.
+- Implemented: file body paths resolve relative to the request JSON file; GET and HEAD bodies are rejected.
 - Current CLI handling covers missing arguments, unreadable files, invalid JSON, and invalid request definitions at the CLI boundary.
-- Next: add focused loading, transport, and CLI tests, using a local test server rather than external service dependencies.
-- Then add request-body execution and resolve body file paths relative to the request file.
-- Distinguish network and timeout failures from configuration failures at the CLI boundary.
+- Implemented: focused validation, loading, transport, and CLI tests using temporary local resources rather than external service dependencies.
+- Remaining polish: distinguish network and timeout failures from configuration failures at the CLI boundary.
 - During incremental implementation, reject unsupported configured features clearly rather than silently ignoring them.
 
 ### 3. Reuse
@@ -306,4 +310,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The next planned change is a focused test for `src/core/execute-request.ts` using a local HTTP server. It should verify method, headers, repeated query parameters, status, binary response bytes, and nonnegative duration without accessing the public internet. After that, expand the test script so the new test runs normally, then add loading and CLI-boundary coverage before implementing request bodies.
+The direct-request prototype checkpoint is complete. The next pass should begin reusable request variables and template resolution while preserving the architecture's `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unsupported variable behavior cannot be silently sent. Before finalizing exit-code behavior, also separate network and timeout failures from configuration failures; both currently exit with code 2.

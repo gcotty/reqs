@@ -1,6 +1,13 @@
-import type { RequestDefinition } from "./request.js";
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+
+import type { RequestBody, RequestDefinition } from "./request.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+export interface ExecuteRequestOptions {
+  requestFilePath?: string;
+}
 
 export interface ExecutedResponse {
   response: Response;
@@ -8,8 +15,58 @@ export interface ExecutedResponse {
   durationMs: number;
 }
 
+interface PreparedBody {
+  value: BodyInit;
+  contentType?: string;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported request body: ${JSON.stringify(value)}`);
+}
+
+async function prepareBody(
+  body: RequestBody,
+  options: ExecuteRequestOptions,
+): Promise<PreparedBody> {
+  switch (body.type) {
+    case "json":
+      return {
+        value: JSON.stringify(body.value),
+        contentType: "application/json",
+      };
+
+    case "text":
+      return {
+        value: body.value,
+        contentType: "text/plain; charset=utf-8",
+      };
+
+    case "form":
+      return {
+        value: new URLSearchParams(body.fields),
+        contentType: "application/x-www-form-urlencoded; charset=utf-8",
+      };
+
+    case "file": {
+      if (options.requestFilePath === undefined) {
+        throw new Error("A request file path is required for file bodies");
+      }
+
+      const bodyPath = resolve(dirname(options.requestFilePath), body.path);
+
+      return {
+        value: await readFile(bodyPath),
+      };
+    }
+
+    default:
+      return assertNever(body);
+  }
+}
+
 export async function executeRequest(
   request: RequestDefinition,
+  options: ExecuteRequestOptions = {},
 ): Promise<ExecutedResponse> {
   if (request.auth !== undefined) {
     throw new Error("Authentication is not supported yet");
@@ -19,11 +76,15 @@ export async function executeRequest(
     throw new Error("Variables are not supported yet");
   }
 
-  if (request.body !== undefined) {
-    throw new Error("Request bodies are not supported yet");
+  if (
+    request.body !== undefined &&
+    (request.method === "GET" || request.method === "HEAD")
+  ) {
+    throw new Error(`${request.method} requests cannot have a body`);
   }
 
   const url = new URL(request.url);
+  const headers = new Headers(request.headers);
 
   if (request.query !== undefined) {
     for (const [name, value] of Object.entries(request.query)) {
@@ -37,18 +98,28 @@ export async function executeRequest(
     }
   }
 
-  const options: RequestInit = {
+  const fetchOptions: RequestInit = {
     method: request.method,
+    headers,
     redirect: "manual",
     signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   };
 
-  if (request.headers !== undefined) {
-    options.headers = request.headers;
+  if (request.body !== undefined) {
+    const preparedBody = await prepareBody(request.body, options);
+
+    fetchOptions.body = preparedBody.value;
+
+    if (
+      preparedBody.contentType !== undefined &&
+      !headers.has("Content-Type")
+    ) {
+      headers.set("Content-Type", preparedBody.contentType);
+    }
   }
 
   const startedAt = performance.now();
-  const response = await fetch(url, options);
+  const response = await fetch(url, fetchOptions);
   const body = new Uint8Array(await response.arrayBuffer());
   const durationMs = performance.now() - startedAt;
 
