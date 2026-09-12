@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && node --test dist/core/validate-request.test.js"
+    "test": "pnpm build && node --test dist/core/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
