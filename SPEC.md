@@ -19,7 +19,7 @@ This document records the intended design, not a claim that every feature exists
 
 ## Current checkpoint
 
-Inspected on 2026-09-07:
+Inspected on 2026-09-11:
 
 | File | Current behavior |
 | --- | --- |
@@ -28,19 +28,17 @@ Inspected on 2026-09-07:
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
 | `.gitignore` | Ignores dependencies, build output, local history, and environment files; allows `.env.example` |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
-| `src/cli.ts` | Help output and unknown-command handling; advertises `run` but does not implement it |
+| `src/cli.ts` | Help and unknown-command handling; `run <file>` loads, validates, and executes a request, writes body bytes to stdout, and writes status and timing to stderr |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
 | `src/core/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
+| `src/core/execute-request.ts` | Executes a direct request with Node's built-in `fetch`, applying headers and query values, using a 30-second timeout, disabling automatic redirects, buffering response bytes, and measuring total response time |
 
-`pnpm test` completed successfully at this checkpoint. The runner output summarized one passing test file. Existing tests exercise validation, not loading, HTTP execution, or end-to-end CLI behavior.
+`pnpm typecheck` and `pnpm test` completed successfully at this checkpoint. The runner output summarized one passing test file. Existing tests exercise validation, not loading, HTTP execution, or end-to-end CLI behavior.
 
-Two small review items before connecting the CLI:
+The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-1. The loader export is currently spelled `loadReqestJson`; the intended name is `loadRequestJson`.
-2. The validator's type-only import uses `./request.ts`. It currently builds because the type import is erased; use `./request.js` for consistency with the project's Node ESM import convention.
-
-These observations are recorded here without modifying implementation files.
+The initial executor deliberately rejects configured `auth`, `vars`, and `body` fields instead of silently ignoring unsupported features. It currently supports only direct, already-resolved URLs plus headers and query values. All errors caught by `run` currently exit with code 2, including network and timeout failures; separating those failures into the proposed exit codes remains future work.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -69,11 +67,12 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 ### 2. First request — in progress
 
 - Implemented: JSON loading and request validation with focused validator tests.
-- Next: review the two checkpoint items and connect `run <file>` to loading and validation.
-- Handle missing arguments, unreadable files, invalid JSON, and invalid request definitions at the CLI boundary.
-- Then add HTTP execution and response output to complete one request end to end.
-- Resolve body file paths relative to the request file.
-- Add focused loading, transport, and CLI tests as those behaviors exist; prefer a local test server over external service dependencies.
+- Implemented: `run <file>` connects loading, validation, HTTP execution, raw response-body output, status/timing output, and HTTP failure exit status.
+- Implemented: direct URLs, request headers, repeated query values, a finite timeout, disabled redirects, and binary-safe buffered response bodies.
+- Current CLI handling covers missing arguments, unreadable files, invalid JSON, and invalid request definitions at the CLI boundary.
+- Next: add focused loading, transport, and CLI tests, using a local test server rather than external service dependencies.
+- Then add request-body execution and resolve body file paths relative to the request file.
+- Distinguish network and timeout failures from configuration failures at the CLI boundary.
 - During incremental implementation, reject unsupported configured features clearly rather than silently ignoring them.
 
 ### 3. Reuse
@@ -251,7 +250,7 @@ Recorded metadata includes a run ID, timestamp, request name, environment, redac
 
 Redact authorization and cookie headers and configured API-key locations. Saved response bodies remain as received, so response recording is opt-in.
 
-Transport defaults: finite timeout, TLS verification enabled, redirects disabled unless requested, and no general automatic retries. Choose the HTTP transport after reviewing timeout, redirects, streaming, and auth requirements. No HTTP or CLI framework has been chosen yet.
+Transport defaults: finite timeout, TLS verification enabled, redirects disabled unless requested, and no general automatic retries. The initial implementation uses Node's built-in `fetch` with a 30-second timeout, manual redirect handling, and an in-memory `Uint8Array` response body. Revisit buffering versus streaming before supporting potentially large response and output files. No CLI framework has been chosen.
 
 Proposed exit codes:
 
@@ -305,4 +304,6 @@ These are possibilities, not commitments for v1.
 
 ## Resume here
 
-Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow. Review the loader name and import convention noted above, then connect `src/cli.ts` to request loading and validation for `run <file>`. Explain async error handling at that point; HTTP execution follows afterward.
+Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
+
+The next planned change is a focused test for `src/core/execute-request.ts` using a local HTTP server. It should verify method, headers, repeated query parameters, status, binary response bytes, and nonnegative duration without accessing the public internet. After that, expand the test script so the new test runs normally, then add loading and CLI-boundary coverage before implementing request bodies.
