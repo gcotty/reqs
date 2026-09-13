@@ -55,7 +55,7 @@ Tracked configuration and request examples now contain placeholders rather than 
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth2, Basic, general command providers, caching, and refresh are not implemented.
+Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth 2.0, Basic, general command providers, caching, and refresh are not implemented.
 
 The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
 
@@ -99,7 +99,7 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 
 - Implemented: nearest-ancestor project config discovery and runtime validation.
 - Remaining: named request discovery, `init`, and `list`.
-- Environments, variable resolution, and temporary CLI overrides.
+- Next: extensible request parameters through variable resolution and temporary CLI overrides. A saved request must be reusable without editing its JSON; for example, a caller can override `gameId` in `requests/nba/boxscores_traditional.json` for one run.
 - Dry-run output with secrets redacted.
 
 ### 4. Authentication — initial profiles working
@@ -108,7 +108,8 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 - Implemented: named API-key profiles targeting a configured header or query parameter.
 - Implemented: `{ "kv": "secret-name" }` references that safely execute the fixed `kv` helper and retain resolved secrets only in process memory.
 - Implemented: project config discovery, validation, secret resolution, credential application, and an end-to-end CLI integration test.
-- Remaining: Basic, OAuth2, and command-based providers.
+- Next auth milestone: OAuth 2.0, initially covering refresh-token and client-credentials grants.
+- Later: Basic and command-based providers.
 - Remaining: local credential cache, expiration handling, refresh locking, atomic updates, and auth management commands.
 
 ### 5. Recording
@@ -188,6 +189,7 @@ reqs run ./requests/users/get.json --env dev
 reqs run users/get --var user_id=456
 reqs run users/get --var-json limit=10
 reqs run users/get --query include=teams
+reqs run ./requests/nba/boxscores_traditional.json --query gameId=2020900360
 reqs run users/get --header 'X-Debug: true'
 reqs run users/get --dry-run
 reqs run users/get --output user.json
@@ -222,6 +224,7 @@ project defaults < request defaults < selected environment < CLI variables
 - `--var name=value` supplies a string; `--var-json name=123` parses a JSON value.
 - Direct header and query overrides apply after variable resolution.
 - A query override replaces all existing values for its key; repeated flags can provide multiple values.
+- Overrides are generic and request-defined rather than endpoint-specific. For example, `--query gameId=2020900360` replaces the saved `gameId` in `requests/nba/boxscores_traditional.json` for that invocation only; it does not modify the request file.
 
 ## Authentication and refresh
 
@@ -230,7 +233,7 @@ project defaults < request defaults < selected environment < CLI variables
 | Basic | Planned; username and password references |
 | Bearer | Implemented with environment-variable or Key Vault token references |
 | API key | Implemented for configured header or query placement with environment-variable or Key Vault value references |
-| OAuth2 | Planned; refresh-token and client-credentials grants |
+| OAuth 2.0 | Next auth milestone; refresh-token and client-credentials grants |
 | Command | Planned; explicit executable and argument list returning a token |
 
 Example secret references:
@@ -275,9 +278,9 @@ Auth providers should apply credentials, refresh when supported, and persist upd
 5. Automatically replay only GET/HEAD by default. Other methods require explicit request configuration and a replayable body.
 6. Report refresh failures without indefinite retries.
 
-OAuth2 refresh-token profiles initially accept a refresh token from a configured secret reference. Browser login, PKCE, and device authorization are deferred. Exact profile fields, cache storage details, refresh skew, and replay opt-in syntax remain implementation decisions.
+OAuth 2.0 is the next authentication feature to implement. Refresh-token profiles initially accept a refresh token from a configured secret reference, and client-credentials profiles obtain an access token without interactive login. Browser login, PKCE, and device authorization are deferred. Exact profile fields, cache storage details, refresh skew, and replay opt-in syntax remain implementation decisions.
 
-The `resolveAuth` API is asynchronous because Key Vault lookup performs child-process I/O. This also preserves the same caller contract when OAuth2 and general command providers are added later. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
+The `resolveAuth` API is asynchronous because Key Vault lookup performs child-process I/O. This also preserves the same caller contract when OAuth 2.0 and general command providers are added later. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
 
 ## Output, history, and transport
 
@@ -348,4 +351,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. The next pass should implement reusable request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example for overriding `gameId` and `measureType`. Preserve the `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After variables, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The direct-request and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse pass should implement extensible request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example: `--query gameId=<value>` must replace the saved `gameId` for one invocation without modifying the file, and the same generic mechanism should support `measureType` and other request-defined parameters. Preserve the `load → validate → resolve → apply overrides → resolve auth → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
