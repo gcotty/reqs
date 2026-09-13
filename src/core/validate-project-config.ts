@@ -1,7 +1,7 @@
 import type {
   AuthProfile,
-  EnvironmentSecretReference,
   ProjectConfig,
+  SecretReference,
 } from "./project-config.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -15,22 +15,42 @@ function isNonEmptyString(value: unknown): value is string {
 function validateSecretReference(
   value: unknown,
   description: string,
-): EnvironmentSecretReference {
-  if (!isObject(value) || !isNonEmptyString(value["env"])) {
+): SecretReference {
+  if (!isObject(value)) {
+    throw new Error(`${description} must contain exactly one of "env" or "kv"`);
+  }
+
+  const hasEnv = Object.hasOwn(value, "env");
+  const hasKv = Object.hasOwn(value, "kv");
+
+  if (hasEnv === hasKv) {
+    throw new Error(`${description} must contain exactly one of "env" or "kv"`);
+  }
+
+  if (hasEnv) {
+    if (!isNonEmptyString(value["env"])) {
+      throw new Error(
+        `${description} must reference a non-empty environment variable`,
+      );
+    }
+
+    return {
+      env: value["env"],
+    };
+  }
+
+  if (!isNonEmptyString(value["kv"])) {
     throw new Error(
-      `${description} must reference a non-empty environment variable`,
+      `${description} must reference a non-empty Key Vault secret name`,
     );
   }
 
   return {
-    env: value["env"],
+    kv: value["kv"],
   };
 }
 
-function validateAuthProfile(
-  profileName: string,
-  value: unknown,
-): AuthProfile {
+function validateAuthProfile(profileName: string, value: unknown): AuthProfile {
   if (!isObject(value)) {
     throw new Error(`Auth profile "${profileName}" must be an object`);
   }
@@ -72,9 +92,7 @@ function validateAuthProfile(
     }
 
     default:
-      throw new Error(
-        `Auth profile "${profileName}" has an unsupported type`,
-      );
+      throw new Error(`Auth profile "${profileName}" has an unsupported type`);
   }
 }
 
@@ -103,10 +121,7 @@ export function validateProjectConfig(value: unknown): ProjectConfig {
         throw new Error("Auth profile names must be non-empty");
       }
 
-      return [
-        profileName,
-        validateAuthProfile(profileName, profileValue),
-      ];
+      return [profileName, validateAuthProfile(profileName, profileValue)];
     });
 
     config.auth = Object.fromEntries(authEntries);

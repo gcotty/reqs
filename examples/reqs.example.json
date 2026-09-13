@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "auth": {
+    "example-env": {
+      "type": "bearer",
+      "token": {
+        "env": "YOUR_API_TOKEN"
+      }
+    },
+    "example-key-vault": {
+      "type": "apiKey",
+      "location": "header",
+      "name": "X-API-Key",
+      "value": {
+        "kv": "your-key-vault-secret-name"
+      }
+    }
+  }
+}

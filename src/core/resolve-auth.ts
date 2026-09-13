@@ -1,8 +1,15 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import type {
   AuthProfile,
   EnvironmentSecretReference,
+  KeyVaultSecretReference,
   ProjectConfig,
+  SecretReference,
 } from "./project-config.js";
+
+const execFileAsync = promisify(execFile);
 
 export type ResolvedAuth =
   | {
@@ -18,6 +25,7 @@ export type ResolvedAuth =
 
 export interface ResolveAuthOptions {
   env?: Readonly<Record<string, string | undefined>>;
+  resolveKeyVaultSecret?: (secretName: string) => Promise<string>;
 }
 
 function assertNever(value: never): never {
@@ -40,6 +48,57 @@ function resolveEnvironmentSecret(
   return value;
 }
 
+async function runKeyVaultCommand(secretName: string): Promise<string> {
+  const { stdout } = await execFileAsync("kv", [secretName], {
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 64 * 1024,
+    windowsHide: true,
+  });
+
+  return stdout;
+}
+
+async function resolveKeyVaultReference(
+  reference: KeyVaultSecretReference,
+  profileName: string,
+  resolver: (secretName: string) => Promise<string>,
+): Promise<string> {
+  let output: string;
+
+  try {
+    output = await resolver(reference.kv);
+  } catch (cause: unknown) {
+    throw new Error(
+      `Failed to retrieve Key Vault secret "${reference.kv}" for auth profile "${profileName}"`,
+      { cause },
+    );
+  }
+
+  const value = output.replace(/[\r\n]+$/u, "");
+
+  if (value === "") {
+    throw new Error(
+      `Key Vault secret "${reference.kv}" for auth profile "${profileName}" must be non-empty`,
+    );
+  }
+
+  return value;
+}
+
+async function resolveSecretReference(
+  reference: SecretReference,
+  profileName: string,
+  env: Readonly<Record<string, string | undefined>>,
+  keyVaultResolver: (secretName: string) => Promise<string>,
+): Promise<string> {
+  if ("env" in reference) {
+    return resolveEnvironmentSecret(reference, profileName, env);
+  }
+
+  return resolveKeyVaultReference(reference, profileName, keyVaultResolver);
+}
+
 export async function resolveAuth(
   profileName: string,
   config: ProjectConfig,
@@ -58,16 +117,19 @@ export async function resolveAuth(
   }
 
   const env = options.env ?? process.env;
+  const keyVaultResolver =
+    options.resolveKeyVaultSecret ?? runKeyVaultCommand;
 
   switch (profile.type) {
     case "bearer":
       return {
         location: "header",
         name: "Authorization",
-        value: `Bearer ${resolveEnvironmentSecret(
+        value: `Bearer ${await resolveSecretReference(
           profile.token,
           profileName,
           env,
+          keyVaultResolver,
         )}`,
       };
 
@@ -75,10 +137,11 @@ export async function resolveAuth(
       return {
         location: profile.location,
         name: profile.name,
-        value: resolveEnvironmentSecret(
+        value: await resolveSecretReference(
           profile.value,
           profileName,
           env,
+          keyVaultResolver,
         ),
       };
 

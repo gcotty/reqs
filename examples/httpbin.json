@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "method": "GET",
+  "url": "https://httpbin.org/anything",
+  "auth": "example-key-vault",
+  "query": {
+    "example": "your-query-value",
+    "include": ["first-value", "second-value"]
+  },
+  "headers": {
+    "Accept": "application/json",
+    "X-Example-Header": "your-header-value"
+  }
+}

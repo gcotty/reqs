@@ -21,6 +21,14 @@ test("accepts bearer and API-key auth profiles", () => {
           env: "SERVICE_TOKEN",
         },
       },
+      warehouse: {
+        type: "apiKey",
+        location: "header",
+        name: "X-Warehouse-Key",
+        value: {
+          kv: "warehouse-api-key",
+        },
+      },
     },
   };
 
@@ -62,6 +70,41 @@ test("rejects invalid bearer token references", () => {
         },
       }),
     /Auth profile "service" token must reference a non-empty environment variable/,
+  );
+});
+
+test("rejects invalid Key Vault secret references", () => {
+  assert.throws(
+    () =>
+      validateProjectConfig({
+        version: 1,
+        auth: {
+          service: {
+            type: "bearer",
+            token: {
+              kv: "",
+            },
+          },
+        },
+      }),
+    /Auth profile "service" token must reference a non-empty Key Vault secret name/,
+  );
+
+  assert.throws(
+    () =>
+      validateProjectConfig({
+        version: 1,
+        auth: {
+          service: {
+            type: "bearer",
+            token: {
+              env: "SERVICE_TOKEN",
+              kv: "service-token",
+            },
+          },
+        },
+      }),
+    /Auth profile "service" token must contain exactly one of "env" or "kv"/,
   );
 });
 

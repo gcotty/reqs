@@ -29,6 +29,14 @@ const config: ProjectConfig = {
         env: "SERVICE_TOKEN",
       },
     },
+    warehouse: {
+      type: "apiKey",
+      location: "header",
+      name: "X-Warehouse-Key",
+      value: {
+        kv: "warehouse-api-key",
+      },
+    },
   },
 };
 
@@ -72,6 +80,57 @@ test("resolves an API key into a configured query parameter", async () => {
     name: "api_key",
     value: "search-secret",
   });
+});
+
+test("resolves a Key Vault secret and removes trailing line endings", async () => {
+  let requestedSecretName: string | undefined;
+
+  const result = await resolveAuth("warehouse", config, {
+    env: {},
+    resolveKeyVaultSecret: async (secretName) => {
+      requestedSecretName = secretName;
+      return "warehouse-secret\r\n";
+    },
+  });
+
+  assert.equal(requestedSecretName, "warehouse-api-key");
+  assert.deepStrictEqual(result, {
+    location: "header",
+    name: "X-Warehouse-Key",
+    value: "warehouse-secret",
+  });
+});
+
+test("rejects empty Key Vault secrets", async () => {
+  for (const value of ["", "\n", "\r\n"]) {
+    await assert.rejects(
+      resolveAuth("warehouse", config, {
+        env: {},
+        resolveKeyVaultSecret: async () => value,
+      }),
+      /Key Vault secret "warehouse-api-key" for auth profile "warehouse" must be non-empty/,
+    );
+  }
+});
+
+test("reports Key Vault command failures without exposing provider output", async () => {
+  await assert.rejects(
+    resolveAuth("warehouse", config, {
+      env: {},
+      resolveKeyVaultSecret: async () => {
+        throw new Error("sensitive provider output");
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        'Failed to retrieve Key Vault secret "warehouse-api-key" for auth profile "warehouse"',
+      );
+      assert.doesNotMatch(error.message, /sensitive provider output/);
+      return true;
+    },
+  );
 });
 
 test("rejects a missing auth profile", async () => {

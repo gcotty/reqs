@@ -5,5 +5,8 @@ dist/
 .env.*
 !.env.example
 
+# Local project configuration may contain real secret names
+/reqs.json
+
 # Personal request files
 requests/

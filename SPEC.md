@@ -26,33 +26,34 @@ Inspected on 2026-09-13:
 | `package.json` | Private ESM package; `reqs` bin points to `dist/cli.js`; includes build, repo-local CLI, typecheck, and test scripts |
 | `pnpm-lock.yaml` | Committed dependency lockfile |
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
-| `.gitignore` | Ignores dependencies, build output, local history, environment files, and the local personal `requests/` directory; allows `.env.example` |
-| `reqs.json` | Project config containing the `nba` API-key profile; it references `NBA_API_KEY` without storing the secret |
-| `README.md` | Documents setup, repo-local CLI usage, the tracked live example, personal request storage, request shapes, limitations, and development checks |
-| `examples/get-httpbin.json` | Tracked credential-free GET example against the public httpbin echo service |
+| `.gitignore` | Ignores dependencies, build output, local history, environment files, the root `reqs.json`, and the local personal `requests/` directory; allows `.env.example` |
+| `reqs.json` | Ignored local project config; it may contain real environment-variable or Key Vault secret names without committing them |
+| `README.md` | Documents setup, repo-local CLI usage, placeholder templates, personal request storage, request shapes, limitations, and development checks |
+| `examples/reqs.example.json` | Tracked placeholder project config showing environment-variable and Key Vault secret references |
+| `examples/httpbin.json` | Tracked placeholder request showing how a request selects an auth profile |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
 | `src/cli.ts` | `run <file>` loads and validates the request and nearest project config, resolves named auth, executes the request, writes body bytes to stdout, and writes status and timing to stderr |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
-| `src/core/project-config.ts` | Project config, environment secret references, and bearer/API-key auth profile types |
+| `src/core/project-config.ts` | Project config, environment and Key Vault secret references, and bearer/API-key auth profile types |
 | `src/core/load-project-config.ts` | Finds the nearest ancestor `reqs.json`, parses it, and provides an empty v1 config when no file exists |
 | `src/core/validate-project-config.ts` | Runtime validation for project config and supported auth profiles |
-| `src/core/resolve-auth.ts` | Resolves bearer and API-key profiles from environment-backed secrets |
+| `src/core/resolve-auth.ts` | Resolves bearer and API-key profiles from environment variables or a `kv` executable on `PATH` |
 | `src/core/apply-resolved-auth.ts` | Applies resolved credentials to prepared headers or query parameters |
 | `src/test/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
 | `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
 | `src/core/execute-request.ts` | Executes requests with headers, query values, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
 | `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
 | `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, output behavior, relative file bodies, and environment-backed API-key auth end to end |
-| `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment-secret resolution, and credential application |
+| `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, failure sanitization, and credential application |
 
-The complete build and test commands completed successfully at this checkpoint. Eight test files declare 36 passing tests covering validation, loading, authentication, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The complete build and test commands completed successfully at this checkpoint. Eight test files declare 40 passing tests covering validation, loading, authentication, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
-The documented example was run successfully through the compiled CLI against httpbin. The local `requests/nba/boxscores_traditional.json` request was also run successfully using the project `nba` profile and an API key supplied through `NBA_API_KEY`. These are manual usage checks only; automated tests remain independent of public services.
+Tracked configuration and request examples now contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. The local `requests/nba/boxscores_traditional.json` request was run successfully through the `nba` profile using a Key Vault-backed API key; the live API returned `200 OK` with a valid JSON body. This is a manual usage check only; automated tests remain independent of public services.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-Authentication now works through named bearer and API-key profiles backed by environment variables. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth2, Basic, command providers, caching, and refresh are not implemented.
+Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth2, Basic, general command providers, caching, and refresh are not implemented.
 
 The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
 
@@ -101,8 +102,9 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 
 ### 4. Authentication — initial profiles working
 
-- Implemented: named bearer profiles using environment-backed tokens.
+- Implemented: named bearer profiles using environment- or Key Vault-backed tokens.
 - Implemented: named API-key profiles targeting a configured header or query parameter.
+- Implemented: `{ "kv": "secret-name" }` references that safely execute the fixed `kv` helper and retain resolved secrets only in process memory.
 - Implemented: project config discovery, validation, secret resolution, credential application, and an end-to-end CLI integration test.
 - Remaining: Basic, OAuth2, and command-based providers.
 - Remaining: local credential cache, expiration handling, refresh locking, atomic updates, and auth management commands.
@@ -170,9 +172,9 @@ requests/
   history/
 ```
 
-`reqs.json` currently supports `version: 1` and an optional `auth` object containing named bearer or API-key profiles. Bearer tokens and API-key values use `{ "env": "VARIABLE_NAME" }` references. API keys specify `location: "header" | "query"` and a credential name. The nearest `reqs.json` at or above the request file is selected; a missing file behaves like `{ "version": 1 }`.
+`reqs.json` currently supports `version: 1` and an optional `auth` object containing named bearer or API-key profiles. Bearer tokens and API-key values use either `{ "env": "VARIABLE_NAME" }` or `{ "kv": "secret-name" }` references. API keys specify `location: "header" | "query"` and a credential name. The nearest `reqs.json` at or above the request file is selected; a missing file behaves like `{ "version": 1 }`.
 
-The configuration file can be committed because it contains secret references rather than secret values. Actual secrets remain in the process environment. Future credential caches belong in local application state scoped by project, environment, and auth profile. Do not store tokens in committed configuration or request files.
+The root `reqs.json` is ignored because even secret names are treated as local information. A placeholder template is tracked at `examples/reqs.example.json`. Environment-backed secrets remain in the process environment; Key Vault-backed secrets travel from the `kv` helper's stdout into process memory and are not persisted by `reqs`. Future credential caches belong in local application state scoped by project, environment, and auth profile. Do not store tokens in committed configuration or request files.
 
 ## Target CLI
 
@@ -224,12 +226,12 @@ project defaults < request defaults < selected environment < CLI variables
 | Profile | Current status |
 | --- | --- |
 | Basic | Planned; username and password references |
-| Bearer | Implemented with an environment-variable token reference |
-| API key | Implemented for configured header or query placement with an environment-variable value reference |
+| Bearer | Implemented with environment-variable or Key Vault token references |
+| API key | Implemented for configured header or query placement with environment-variable or Key Vault value references |
 | OAuth2 | Planned; refresh-token and client-credentials grants |
 | Command | Planned; explicit executable and argument list returning a token |
 
-Example secret reference:
+Example secret references:
 
 ```json
 {
@@ -237,6 +239,21 @@ Example secret reference:
   "token": { "env": "API_TOKEN" }
 }
 ```
+
+```json
+{
+  "type": "apiKey",
+  "location": "header",
+  "name": "X-API-Key",
+  "value": { "kv": "your-key-vault-secret-name" }
+}
+```
+
+Key Vault references execute `kv secret-name` directly with an argument array,
+not through a shell. The helper must be a real executable available on `PATH`;
+a shell alias or function alone will not work. It must accept exactly one secret
+name, return a nonzero status on failure, and write only the secret value to
+stdout.
 
 Command providers run an executable with arguments rather than a shell string. Proposed stdout contract:
 
@@ -258,7 +275,7 @@ Auth providers should apply credentials, refresh when supported, and persist upd
 
 OAuth2 refresh-token profiles initially accept a refresh token from a configured secret reference. Browser login, PKCE, and device authorization are deferred. Exact profile fields, cache storage details, refresh skew, and replay opt-in syntax remain implementation decisions.
 
-The current `resolveAuth` API is asynchronous even though environment lookup is immediate. This preserves the same caller contract when OAuth2 and command providers later perform I/O. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
+The `resolveAuth` API is asynchronous because Key Vault lookup performs child-process I/O. This also preserves the same caller contract when OAuth2 and general command providers are added later. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
 
 ## Output, history, and transport
 
@@ -330,4 +347,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request and initial environment-backed authentication checkpoints are complete. The next pass should implement reusable request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example for overriding `gameId` and `measureType`. Preserve the `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After variables, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The direct-request and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. The next pass should implement reusable request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example for overriding `gameId` and `measureType`. Preserve the `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After variables, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
