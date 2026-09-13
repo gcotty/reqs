@@ -32,7 +32,7 @@ Inspected on 2026-09-13:
 | `examples/reqs.example.json` | Tracked placeholder project config showing environment-variable and Key Vault secret references |
 | `examples/httpbin.json` | Tracked placeholder request showing how a request selects an auth profile |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
-| `src/cli.ts` | `run <file>` loads and validates the request and nearest project config, resolves named auth, executes the request, pretty-prints valid JSON responses to stdout, and writes status and timing to stderr |
+| `src/cli.ts` | `run <file>` parses temporary query overrides, loads and validates the request and nearest project config, resolves named auth, executes the request, pretty-prints valid JSON responses to stdout, and writes status and timing to stderr |
 | `src/core/format-response-body.ts` | Pretty-prints valid `application/json` and `+json` response bodies while preserving all other bytes |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
@@ -43,13 +43,13 @@ Inspected on 2026-09-13:
 | `src/core/apply-resolved-auth.ts` | Applies resolved credentials to prepared headers or query parameters |
 | `src/test/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
 | `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
-| `src/core/execute-request.ts` | Executes requests with headers, query values, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
-| `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
-| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, JSON and binary output behavior, relative file bodies, and environment-backed API-key auth end to end |
+| `src/core/execute-request.ts` | Executes requests with headers, saved and overridden query values, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
+| `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, query overrides, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
+| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, query overrides, JSON and binary output behavior, relative file bodies, and environment-backed API-key auth end to end |
 | `src/test/format-response-body.test.ts` | Covers standard and structured JSON media types plus preservation of non-JSON and malformed bodies |
 | `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, failure sanitization, and credential application |
 
-The complete build and test commands completed successfully at this checkpoint. Nine test files declare 43 passing tests covering validation, loading, authentication, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The complete build and test commands completed successfully at this checkpoint. Nine test files declare 45 passing tests covering validation, loading, authentication, query overrides, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
 Tracked configuration and request examples now contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. The local `requests/nba/boxscores_traditional.json` request was run successfully through the `nba` profile using a Key Vault-backed API key; the live API returned `200 OK` with a valid JSON body. This is a manual usage check only; automated tests remain independent of public services.
 
@@ -57,7 +57,7 @@ The earlier loader typo has been corrected to `loadRequestJson`. The validator's
 
 Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth 2.0, Basic, general command providers, caching, and refresh are not implemented.
 
-The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
+The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated saved query values; temporary CLI query overrides; and JSON, text, form, or file bodies. A query override replaces all matching values from both the saved URL and `query` object, or adds the parameter when it is absent. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -98,8 +98,9 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 ### 3. Reuse
 
 - Implemented: nearest-ancestor project config discovery and runtime validation.
+- Implemented: temporary `--query name=value` overrides with last-value-wins behavior; saved request files are not modified.
 - Remaining: named request discovery, `init`, and `list`.
-- Next: extensible request parameters through variable resolution and temporary CLI overrides. A saved request must be reusable without editing its JSON; for example, a caller can override `gameId` in `requests/nba/boxscores_traditional.json` for one run.
+- Remaining: named environments.
 - Dry-run output with secrets redacted.
 
 ### 4. Authentication — initial profiles working
@@ -131,11 +132,8 @@ Request files are editable, versioned JSON and the source of truth. No database 
 {
   "version": 1,
   "method": "GET",
-  "url": "{{base_url}}/users/{{user_id | path}}",
+  "url": "https://example.com/users",
   "auth": "api",
-  "vars": {
-    "user_id": "123"
-  },
   "query": {
     "include": ["profile", "teams"]
   },
@@ -149,7 +147,8 @@ Request files are editable, versioned JSON and the source of truth. No database 
 - Required fields: `version: 1`, `method`, and nonempty `url`.
 - Optional fields: `auth`, `vars`, `query`, `headers`, and `body`.
 - `auth` names a profile rather than embedding credentials.
-- Variables can contain JSON values; headers contain strings; query values are strings or arrays of strings.
+- Headers contain strings; query values are strings or arrays of strings.
+- The validator currently accepts `vars` containing JSON values, but execution rejects them because variable substitution is not implemented.
 - Bodies form a discriminated union:
   - `{ "type": "json", "value": ... }`
   - `{ "type": "text", "value": "..." }`
@@ -157,7 +156,7 @@ Request files are editable, versioned JSON and the source of truth. No database 
   - `{ "type": "file", "path": "./payload.bin" }`
 - Form bodies use URL-encoded fields; multipart is deferred.
 - The current validator accepts extra properties. It reconstructs the top-level request from recognized fields.
-- URL parsing happens after template resolution; the current validator only requires a nonempty string.
+- URL parsing happens during execution; the current validator only requires a nonempty string.
 - The recursive JSON guard is intended for parsed JSON, not arbitrary cyclic JavaScript objects.
 - A JSON Schema for editor assistance is a possible later addition; no schema file currently exists.
 
@@ -186,11 +185,8 @@ reqs init
 reqs list
 reqs run users/get --env dev
 reqs run ./requests/users/get.json --env dev
-reqs run users/get --var user_id=456
-reqs run users/get --var-json limit=10
 reqs run users/get --query include=teams
 reqs run ./requests/nba/boxscores_traditional.json --query gameId=2020900360
-reqs run users/get --header 'X-Debug: true'
 reqs run users/get --dry-run
 reqs run users/get --output user.json
 reqs run users/get --save-response
@@ -202,28 +198,19 @@ reqs history users/get
 reqs history show <run-id>
 ```
 
-Overrides affect only the current run. Users can edit JSON directly. Saving variants, an editor command, and automatic historical replay are deferred. Earlier brainstorming included `auth login`; interactive login is not part of the v1 commitment.
+Query overrides affect only the current run. Users can edit JSON directly for other changes. Saving variants, an editor command, and automatic historical replay are deferred. Earlier brainstorming included `auth login`; interactive login is not part of the v1 commitment.
 
-## Variables and overrides
+## Query overrides
 
-Precedence, lowest to highest:
+`--query name=value` modifies the final outgoing query string without changing the saved request file.
 
-```text
-project defaults < request defaults < selected environment < CLI variables
-```
-
-- `{{name}}` resolves an ordinary variable.
-- `{{env.API_TOKEN}}` explicitly reads an operating-system environment variable.
-- Missing variables fail before sending.
-- No arbitrary expressions, JavaScript evaluation, or recursive expansion.
-- A whole-value placeholder in a JSON body preserves the variable's JSON type.
-- Embedded placeholders produce strings; embedding objects or arrays is an error.
-- Substitute into parsed JSON values, never raw JSON text.
-- Encode query values using URL query encoding.
-- Provide explicit path-component encoding, proposed syntax `{{user_id | path}}`.
-- `--var name=value` supplies a string; `--var-json name=123` parses a JSON value.
-- Direct header and query overrides apply after variable resolution.
-- A query override replaces all existing values for its key; repeated flags can provide multiple values.
+- If the name exists in either the saved URL or `query` object, the override replaces all of its saved values.
+- If the name does not exist, the override adds it.
+- If the same name is passed more than once, the last CLI value wins.
+- An empty value is valid, and values may contain additional `=` characters.
+- URL query encoding is handled by `URLSearchParams`.
+- Saved query arrays remain unchanged when their name is not overridden.
+- Query-based auth is applied afterward and replaces a conflicting CLI value so a CLI override cannot replace a configured credential.
 - Overrides are generic and request-defined rather than endpoint-specific. For example, `--query gameId=2020900360` replaces the saved `gameId` in `requests/nba/boxscores_traditional.json` for that invocation only; it does not modify the request file.
 
 ## Authentication and refresh
@@ -314,8 +301,8 @@ HTTP error responses still print or save their bodies. Handle loading and execut
 Keep argument parsing separate from the core:
 
 ```text
-load → validate → resolve variables → apply overrides
-     → resolve auth → execute → render / record
+parse CLI → load → validate → resolve auth
+          → execute (saved query → overrides → auth) → render / record
 ```
 
 Use discriminated unions for request bodies and auth profiles, and runtime validation at external-data boundaries. The initial path can send one request at a time; asynchronous Node I/O does not require a concurrent runner.
@@ -325,7 +312,7 @@ Use discriminated unions for request bodies and auth profiles, and runtime valid
 V1 is complete when a user can:
 
 - Save a request as JSON and run it by path or name.
-- Run it against two environments and override parameters without editing the file.
+- Run it against two environments and override query parameters without editing the file.
 - Use the agreed auth profiles and obtain or refresh credentials where supported.
 - Pipe the response body into another command.
 - Optionally write a body file or save and inspect response history.
@@ -336,6 +323,7 @@ Relevant checks must pass, and setup and usage must be documented. Advanced feat
 ## Longer-term possibilities
 
 - Saved variants (`--save-as`) and an editor command.
+- Template variables for changing other request fields without editing the file.
 - Multipart uploads and cookie persistence.
 - Collections and batch execution.
 - Assertions and scripting hooks.
@@ -351,4 +339,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse pass should implement extensible request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example: `--query gameId=<value>` must replace the saved `gameId` for one invocation without modifying the file, and the same generic mechanism should support `measureType` and other request-defined parameters. Preserve the `load → validate → resolve → apply overrides → resolve auth → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The direct-request, temporary query-override, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `--query name=value` replaces every matching saved value or adds a missing parameter for one invocation, and the last CLI value wins when a name is repeated. Only query parameters are currently modifiable from the CLI; the executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is named environments, request discovery, `init`, and `list`. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.

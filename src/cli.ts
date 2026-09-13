@@ -11,6 +11,52 @@ import { resolveAuth } from "./core/resolve-auth.js";
 import { validateProjectConfig } from "./core/validate-project-config.js";
 import { validateRequest } from "./core/validate-request.js";
 
+interface RunArguments {
+  filePath: string;
+  queryOverrides: Map<string, string>;
+}
+
+function parseRunArguments(args: string[]): RunArguments {
+  const filePath = args[0];
+
+  if (filePath === undefined) {
+    throw new Error("Usage: reqs run <file> [--query name=value]");
+  }
+
+  const queryOverrides = new Map<string, string>();
+
+  for (let index = 1; index < args.length; index += 1) {
+    const argument = args[index];
+
+    if (argument !== "--query") {
+      throw new Error(`Unknown run option: ${argument}`);
+    }
+
+    const assignment = args[index + 1];
+
+    if (assignment === undefined) {
+      throw new Error("--query requires name=value");
+    }
+
+    const separatorIndex = assignment.indexOf("=");
+
+    if (separatorIndex <= 0) {
+      throw new Error("--query requires a non-empty name in name=value");
+    }
+
+    const name = assignment.slice(0, separatorIndex);
+    const value = assignment.slice(separatorIndex + 1);
+
+    queryOverrides.set(name, value);
+    index += 1;
+  }
+
+  return {
+    filePath,
+    queryOverrides,
+  };
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
@@ -18,22 +64,15 @@ async function main(): Promise<void> {
     console.log("Usage: reqs <command>");
     console.log("");
     console.log("Commands:");
-    console.log(" run <file> Run a saved HTTP request");
+    console.log(" run <file> [--query name=value] Run a saved HTTP request");
     return;
   }
 
   const command = args[0];
 
   if (command === "run") {
-    const filePath = args[1];
-
-    if (filePath === undefined) {
-      console.error("Usage: reqs run <file>");
-      process.exitCode = 2;
-      return;
-    }
-
     try {
+      const { filePath, queryOverrides } = parseRunArguments(args.slice(1));
       const input = await loadRequestJson(filePath);
       const request = validateRequest(input);
 
@@ -43,6 +82,10 @@ async function main(): Promise<void> {
       const executeOptions: ExecuteRequestOptions = {
         requestFilePath: filePath,
       };
+
+      if (queryOverrides.size > 0) {
+        executeOptions.queryOverrides = queryOverrides;
+      }
 
       if (request.auth !== undefined) {
         executeOptions.auth = await resolveAuth(request.auth, config);
@@ -70,7 +113,11 @@ async function main(): Promise<void> {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
 
-      console.error(`Failed to run request: ${message}`);
+      console.error(
+        message.startsWith("Usage:")
+          ? message
+          : `Failed to run request: ${message}`,
+      );
       process.exitCode = 2;
     }
 

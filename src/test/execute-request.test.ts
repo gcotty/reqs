@@ -24,7 +24,7 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-test("executes a request with headers and repeated query values", async (context) => {
+test("executes a request with headers and query overrides", async (context) => {
   let receivedMethod: string | undefined;
   let receivedUrl: string | undefined;
   let receivedHeader: string | string[] | undefined;
@@ -64,13 +64,25 @@ test("executes a request with headers and repeated query values", async (context
     },
   };
 
-  const { response, body, durationMs } = await executeRequest(request);
+  const { response, body, durationMs } = await executeRequest(request, {
+    auth: {
+      location: "query",
+      name: "apiKey",
+      value: "resolved-secret",
+    },
+    queryOverrides: new Map([
+      ["existing", "replaced"],
+      ["include", "summary"],
+      ["page", "2"],
+      ["apiKey", "cli-value"],
+    ]),
+  });
 
   assert.equal(receivedMethod, "GET");
   assert.equal(receivedHeader, "transport");
   assert.equal(
     receivedUrl,
-    "/users?existing=yes&include=profile&include=teams&limit=10",
+    "/users?existing=replaced&include=summary&limit=10&page=2&apiKey=resolved-secret",
   );
 
   assert.equal(response.status, 201);

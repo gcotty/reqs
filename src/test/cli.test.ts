@@ -119,7 +119,35 @@ test("reports a missing request-file argument", async () => {
 
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout.length, 0);
-  assert.equal(result.stderr, "Usage: reqs run <file>\n");
+  assert.equal(
+    result.stderr,
+    "Usage: reqs run <file> [--query name=value]\n",
+  );
+});
+
+test("reports invalid query override arguments", async () => {
+  const missingValue = await runCli([
+    "run",
+    "request.json",
+    "--query",
+  ]);
+  const missingName = await runCli([
+    "run",
+    "request.json",
+    "--query",
+    "=value",
+  ]);
+
+  assert.equal(missingValue.exitCode, 2);
+  assert.equal(missingValue.stdout.length, 0);
+  assert.match(missingValue.stderr, /--query requires name=value/);
+
+  assert.equal(missingName.exitCode, 2);
+  assert.equal(missingName.stdout.length, 0);
+  assert.match(
+    missingName.stderr,
+    /--query requires a non-empty name in name=value/,
+  );
 });
 
 test("reports an invalid request definition", async (context) => {
@@ -168,6 +196,72 @@ test("writes response bytes to stdout and status to stderr", async (context) => 
   assert.equal(result.exitCode, 0);
   assert.deepStrictEqual(result.stdout, Buffer.from(responseBody));
   assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+});
+
+test("replaces or adds query parameters with last-value-wins", async (context) => {
+  let receivedUrl: string | undefined;
+
+  const server = createServer((request, response) => {
+    receivedUrl = request.url;
+    response.writeHead(200);
+    response.end("ok");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "request.json");
+
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${address.port}/games?gameId=url-old&preserved=url`,
+      query: {
+        gameId: ["saved-old-one", "saved-old-two"],
+        format: "json",
+      },
+    }),
+    "utf8",
+  );
+
+  const result = await runCli([
+    "run",
+    filePath,
+    "--query",
+    "gameId=first",
+    "--query",
+    "new=value=with=equals",
+    "--query",
+    "empty=",
+    "--query",
+    "gameId=final",
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "ok");
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+  if (receivedUrl === undefined) {
+    throw new Error("Test server did not receive the request");
+  }
+
+  const query = new URL(receivedUrl, "http://127.0.0.1").searchParams;
+
+  assert.deepStrictEqual(query.getAll("gameId"), ["final"]);
+  assert.deepStrictEqual(query.getAll("preserved"), ["url"]);
+  assert.deepStrictEqual(query.getAll("format"), ["json"]);
+  assert.deepStrictEqual(query.getAll("new"), ["value=with=equals"]);
+  assert.deepStrictEqual(query.getAll("empty"), [""]);
 });
 
 test("pretty-prints JSON responses to stdout", async (context) => {

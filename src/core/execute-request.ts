@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface ExecuteRequestOptions {
   auth?: ResolvedAuth;
+  queryOverrides?: ReadonlyMap<string, string>;
   requestFilePath?: string;
 }
 
@@ -98,6 +99,12 @@ export async function executeRequest(
       } else {
         url.searchParams.append(name, value);
       }
+    }
+  }
+
+  if (options.queryOverrides !== undefined) {
+    for (const [name, value] of options.queryOverrides) {
+      url.searchParams.set(name, value);
     }
   }
 

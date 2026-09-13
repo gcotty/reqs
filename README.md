@@ -35,6 +35,19 @@ which keeps redirection clean:
 pnpm --silent reqs run requests/httpbin.json > response.json
 ```
 
+Query parameters can be replaced or added for one run without changing the
+saved request:
+
+```sh
+pnpm reqs run requests/httpbin.json --query example=temporary-value
+```
+
+Pass `--query name=value` for each parameter you want to change. If the name
+already appears in the request URL or its `query` object, the override replaces
+all saved values; otherwise it is added. When the same name is provided more
+than once, the last CLI value wins. Values may be empty or contain additional
+`=` characters.
+
 ## Personal requests
 
 Tracked samples live in `examples/`. The contents of `requests/` are ignored by
@@ -81,8 +94,9 @@ You can verify that the executable is available with:
 command -v kv
 ```
 
-Variables and request parameter overrides are not implemented yet. See
-`SPEC.md` for the complete format, current limitations, and roadmap.
+Query parameter overrides are supported. Variables and overrides for other
+parts of a request are not implemented. See `SPEC.md` for the complete format,
+current limitations, and roadmap.
 
 ## Development
 
