@@ -1,11 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { applyResolvedAuth } from "./apply-resolved-auth.js";
 import type { RequestBody, RequestDefinition } from "./request.js";
+import type { ResolvedAuth } from "./resolve-auth.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface ExecuteRequestOptions {
+  auth?: ResolvedAuth;
   requestFilePath?: string;
 }
 
@@ -68,8 +71,8 @@ export async function executeRequest(
   request: RequestDefinition,
   options: ExecuteRequestOptions = {},
 ): Promise<ExecutedResponse> {
-  if (request.auth !== undefined) {
-    throw new Error("Authentication is not supported yet");
+  if (request.auth !== undefined && options.auth === undefined) {
+    throw new Error(`Auth profile "${request.auth}" was not resolved`);
   }
 
   if (request.vars !== undefined) {
@@ -96,6 +99,10 @@ export async function executeRequest(
         url.searchParams.append(name, value);
       }
     }
+  }
+
+  if (options.auth !== undefined) {
+    applyResolvedAuth(url, headers, options.auth);
   }
 
   const fetchOptions: RequestInit = {

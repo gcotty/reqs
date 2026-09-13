@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
-import { executeRequest } from "./core/execute-request.js";
+import {
+  executeRequest,
+  type ExecuteRequestOptions,
+} from "./core/execute-request.js";
+import { loadProjectConfigJson } from "./core/load-project-config.js";
 import { loadRequestJson } from "./core/load-request.js";
+import { resolveAuth } from "./core/resolve-auth.js";
+import { validateProjectConfig } from "./core/validate-project-config.js";
 import { validateRequest } from "./core/validate-request.js";
 
 async function main(): Promise<void> {
@@ -29,9 +35,22 @@ async function main(): Promise<void> {
     try {
       const input = await loadRequestJson(filePath);
       const request = validateRequest(input);
-      const { response, body, durationMs } = await executeRequest(request, {
+
+      const loadedConfig = await loadProjectConfigJson(filePath);
+      const config = validateProjectConfig(loadedConfig.input);
+
+      const executeOptions: ExecuteRequestOptions = {
         requestFilePath: filePath,
-      });
+      };
+
+      if (request.auth !== undefined) {
+        executeOptions.auth = await resolveAuth(request.auth, config);
+      }
+
+      const { response, body, durationMs } = await executeRequest(
+        request,
+        executeOptions,
+      );
 
       process.stdout.write(body);
 

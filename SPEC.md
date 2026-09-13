@@ -19,7 +19,7 @@ This document records the intended design, not a claim that every feature exists
 
 ## Current checkpoint
 
-Inspected on 2026-09-11:
+Inspected on 2026-09-13:
 
 | File | Current behavior |
 | --- | --- |
@@ -27,25 +27,34 @@ Inspected on 2026-09-11:
 | `pnpm-lock.yaml` | Committed dependency lockfile |
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
 | `.gitignore` | Ignores dependencies, build output, local history, environment files, and the local personal `requests/` directory; allows `.env.example` |
+| `reqs.json` | Project config containing the `nba` API-key profile; it references `NBA_API_KEY` without storing the secret |
 | `README.md` | Documents setup, repo-local CLI usage, the tracked live example, personal request storage, request shapes, limitations, and development checks |
 | `examples/get-httpbin.json` | Tracked credential-free GET example against the public httpbin echo service |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
-| `src/cli.ts` | Help and unknown-command handling; `run <file>` loads, validates, and executes a request, writes body bytes to stdout, and writes status and timing to stderr |
+| `src/cli.ts` | `run <file>` loads and validates the request and nearest project config, resolves named auth, executes the request, writes body bytes to stdout, and writes status and timing to stderr |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
-| `src/core/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
-| `src/core/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
-| `src/core/execute-request.ts` | Executes direct requests with headers, query values, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
-| `src/core/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
-| `src/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, stdout/stderr separation, HTTP exit status, binary output, and relative file bodies end to end |
+| `src/core/project-config.ts` | Project config, environment secret references, and bearer/API-key auth profile types |
+| `src/core/load-project-config.ts` | Finds the nearest ancestor `reqs.json`, parses it, and provides an empty v1 config when no file exists |
+| `src/core/validate-project-config.ts` | Runtime validation for project config and supported auth profiles |
+| `src/core/resolve-auth.ts` | Resolves bearer and API-key profiles from environment-backed secrets |
+| `src/core/apply-resolved-auth.ts` | Applies resolved credentials to prepared headers or query parameters |
+| `src/test/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
+| `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
+| `src/core/execute-request.ts` | Executes requests with headers, query values, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
+| `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
+| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, output behavior, relative file bodies, and environment-backed API-key auth end to end |
+| `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment-secret resolution, and credential application |
 
-`pnpm typecheck`, `pnpm build`, and the complete test command completed successfully at this checkpoint. Four test files declare 18 passing tests covering validation, loading, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The complete build and test commands completed successfully at this checkpoint. Eight test files declare 36 passing tests covering validation, loading, authentication, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
-The documented example was also run successfully through the compiled CLI against httpbin. This is a manual usage check only; automated tests remain independent of the public service.
+The documented example was run successfully through the compiled CLI against httpbin. The local `requests/nba/boxscores_traditional.json` request was also run successfully using the project `nba` profile and an API key supplied through `NBA_API_KEY`. These are manual usage checks only; automated tests remain independent of public services.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-The initial executor deliberately rejects configured `auth` and `vars` fields instead of silently ignoring unsupported features. It supports direct, already-resolved URLs; headers; repeated query values; and JSON, text, form, and file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. All errors caught by `run` currently exit with code 2, including network and timeout failures; separating those failures into the proposed exit codes remains future work.
+Authentication now works through named bearer and API-key profiles backed by environment variables. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth2, Basic, command providers, caching, and refresh are not implemented.
+
+The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -59,7 +68,7 @@ pnpm test
 node dist/cli.js --help
 ```
 
-`typecheck` runs `tsc --noEmit`. `build` emits JavaScript into ignored local `dist/`. `test` builds and runs compiled `*.test.js` files directly under `dist/` and `dist/core/`. The explicit compiled-output patterns prevent recent Node versions from discovering and attempting to execute the TypeScript source tests directly.
+`typecheck` runs `tsc --noEmit`. `build` emits JavaScript into ignored local `dist/`. Source tests live under `src/test/`; `test` builds and runs their compiled `dist/test/*.test.js` files. The explicit compiled-output pattern prevents recent Node versions from discovering and attempting to execute the TypeScript source tests directly.
 
 TypeScript checks authored code at compile time. It does not validate JSON read from disk. Runtime validation remains necessary after loading. Tests use fresh hardcoded values, temporary files and directories, local HTTP servers, and child CLI processes as appropriate to each boundary.
 
@@ -85,15 +94,18 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 
 ### 3. Reuse
 
-- Project configuration, named request discovery, `init`, and `list`.
+- Implemented: nearest-ancestor project config discovery and runtime validation.
+- Remaining: named request discovery, `init`, and `list`.
 - Environments, variable resolution, and temporary CLI overrides.
 - Dry-run output with secrets redacted.
 
-### 4. Authentication
+### 4. Authentication — initial profiles working
 
-- Named profiles for Basic, bearer, API key, OAuth2, and command-based tokens.
-- Local credential cache, expiration handling, refresh locking, and atomic updates.
-- Auth status, refresh, and clear commands.
+- Implemented: named bearer profiles using environment-backed tokens.
+- Implemented: named API-key profiles targeting a configured header or query parameter.
+- Implemented: project config discovery, validation, secret resolution, credential application, and an end-to-end CLI integration test.
+- Remaining: Basic, OAuth2, and command-based providers.
+- Remaining: local credential cache, expiration handling, refresh locking, atomic updates, and auth management commands.
 
 ### 5. Recording
 
@@ -158,7 +170,9 @@ requests/
   history/
 ```
 
-`reqs.json` defines project defaults, environments, and named auth profiles. Its exact schema remains to be designed. Keep credential references in configuration and actual token caches in the user's local application state directory, scoped by project, environment, and auth profile. Do not store tokens in committed request files.
+`reqs.json` currently supports `version: 1` and an optional `auth` object containing named bearer or API-key profiles. Bearer tokens and API-key values use `{ "env": "VARIABLE_NAME" }` references. API keys specify `location: "header" | "query"` and a credential name. The nearest `reqs.json` at or above the request file is selected; a missing file behaves like `{ "version": 1 }`.
+
+The configuration file can be committed because it contains secret references rather than secret values. Actual secrets remain in the process environment. Future credential caches belong in local application state scoped by project, environment, and auth profile. Do not store tokens in committed configuration or request files.
 
 ## Target CLI
 
@@ -207,13 +221,13 @@ project defaults < request defaults < selected environment < CLI variables
 
 ## Authentication and refresh
 
-| Profile | Intended support |
+| Profile | Current status |
 | --- | --- |
-| Basic | Username and password references |
-| Bearer | Token reference, initially from an environment variable |
-| API key | Credential in a configured header or query parameter |
-| OAuth2 | Refresh-token and client-credentials grants |
-| Command | Explicit executable and argument list that returns a token |
+| Basic | Planned; username and password references |
+| Bearer | Implemented with an environment-variable token reference |
+| API key | Implemented for configured header or query placement with an environment-variable value reference |
+| OAuth2 | Planned; refresh-token and client-credentials grants |
+| Command | Planned; explicit executable and argument list returning a token |
 
 Example secret reference:
 
@@ -243,6 +257,8 @@ Auth providers should apply credentials, refresh when supported, and persist upd
 6. Report refresh failures without indefinite retries.
 
 OAuth2 refresh-token profiles initially accept a refresh token from a configured secret reference. Browser login, PKCE, and device authorization are deferred. Exact profile fields, cache storage details, refresh skew, and replay opt-in syntax remain implementation decisions.
+
+The current `resolveAuth` API is asynchronous even though environment lookup is immediate. This preserves the same caller contract when OAuth2 and command providers later perform I/O. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
 
 ## Output, history, and transport
 
@@ -314,4 +330,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request prototype checkpoint is complete. The next pass should begin reusable request variables and template resolution while preserving the architecture's `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unsupported variable behavior cannot be silently sent. Before finalizing exit-code behavior, also separate network and timeout failures from configuration failures; both currently exit with code 2.
+The direct-request and initial environment-backed authentication checkpoints are complete. The next pass should implement reusable request variables and CLI overrides, using `requests/nba/boxscores_traditional.json` as the concrete example for overriding `gameId` and `measureType`. Preserve the `load → validate → resolve → execute` boundary. The executor currently rejects any configured `vars`, so unresolved variable behavior cannot be silently sent. After variables, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.

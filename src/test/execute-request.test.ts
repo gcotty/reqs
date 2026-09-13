@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { executeRequest } from "./execute-request.js";
+import { executeRequest } from "../core/execute-request.js";
 import type {
   RequestBody,
   RequestDefinition,
-} from "./request.js";
+} from "../core/request.js";
 
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {

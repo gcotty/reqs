@@ -11,7 +11,7 @@
     "build": "tsc",
     "reqs": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && node --test dist/*.test.js dist/core/*.test.js"
+    "test": "pnpm build && node --test dist/test/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const cliPath = fileURLToPath(new URL("./cli.js", import.meta.url));
+const cliPath = fileURLToPath(new URL("../cli.js", import.meta.url));
 
 interface CliResult {
   exitCode: number | null;
@@ -16,9 +16,19 @@ interface CliResult {
   stderr: string;
 }
 
-function runCli(args: string[]): Promise<CliResult> {
+function runCli(
+  args: string[],
+  envOverrides: Record<string, string> = {},
+): Promise<CliResult> {
   return new Promise((resolve, reject) => {
+    const childEnvironment = {
+      ...process.env,
+      ...envOverrides,
+    };
+    delete childEnvironment["NODE_TEST_CONTEXT"];
+
     const child = spawn(process.execPath, [cliPath, ...args], {
+      env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -244,4 +254,69 @@ test("resolves a file body relative to the request file", async (context) => {
   assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
   assert.deepStrictEqual(receivedBody, payload);
   assert.equal(receivedContentType, "application/octet-stream");
+});
+
+test("loads and applies a named API-key auth profile", async (context) => {
+  let receivedApiKey: string | string[] | undefined;
+
+  const server = createServer((request, response) => {
+    receivedApiKey = request.headers["x-nba-api-key"];
+
+    response.writeHead(200);
+    response.end("authenticated");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const requestDirectory = join(directory, "requests", "nba");
+  const requestFilePath = join(requestDirectory, "boxscore.json");
+  const configFilePath = join(directory, "reqs.json");
+
+  await mkdir(requestDirectory, { recursive: true });
+  await writeFile(
+    configFilePath,
+    JSON.stringify({
+      version: 1,
+      auth: {
+        nba: {
+          type: "apiKey",
+          location: "header",
+          name: "X-NBA-Api-Key",
+          value: {
+            env: "NBA_API_KEY",
+          },
+        },
+      },
+    }),
+    "utf8",
+  );
+  await writeFile(
+    requestFilePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${address.port}/boxscore`,
+      auth: "nba",
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", requestFilePath], {
+    NBA_API_KEY: "integration-secret",
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "authenticated");
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+  assert.equal(receivedApiKey, "integration-secret");
 });

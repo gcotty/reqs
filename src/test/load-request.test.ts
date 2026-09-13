@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-import { loadRequestJson } from "./load-request.js";
+import { loadRequestJson } from "../core/load-request.js";
 
 async function createTempDirectory(context: TestContext): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "reqs-load-request-"));

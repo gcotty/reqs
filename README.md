@@ -58,8 +58,10 @@ Required fields are `version`, `method`, and `url`. Optional fields are
 `file`; file paths are relative to the request JSON file. GET and HEAD bodies
 are rejected.
 
-Variables and authentication are not implemented yet. See `SPEC.md` for the
-complete format, current limitations, and roadmap.
+Named bearer-token and API-key authentication profiles are supported through
+environment-variable references in `reqs.json`. Variables and request
+parameter overrides are not implemented yet. See `SPEC.md` for the complete
+format, current limitations, and roadmap.
 
 ## Development
 

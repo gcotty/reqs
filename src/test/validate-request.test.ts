@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { validateRequest } from "./validate-request.js";
+import { validateRequest } from "../core/validate-request.js";
 
 function minimalRequest() {
   return {
