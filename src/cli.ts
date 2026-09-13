@@ -4,6 +4,7 @@ import {
   executeRequest,
   type ExecuteRequestOptions,
 } from "./core/execute-request.js";
+import { formatResponseBody } from "./core/format-response-body.js";
 import { loadProjectConfigJson } from "./core/load-project-config.js";
 import { loadRequestJson } from "./core/load-request.js";
 import { resolveAuth } from "./core/resolve-auth.js";
@@ -52,7 +53,12 @@ async function main(): Promise<void> {
         executeOptions,
       );
 
-      process.stdout.write(body);
+      const outputBody = formatResponseBody(
+        body,
+        response.headers.get("content-type"),
+      );
+
+      process.stdout.write(outputBody);
 
       console.error(
         `${response.status} ${response.statusText} (${durationMs.toFixed(0)} ms)`,

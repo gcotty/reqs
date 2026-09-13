@@ -26,9 +26,10 @@ shapes without exposing real secret names. Edit the copied `reqs.json` and
 request before running them. The root `reqs.json` and `requests/` directory are
 ignored by Git.
 
-The example request targets the public httpbin service. Once configured,
-response bytes go to stdout while status and timing go to stderr. This keeps
-redirection clean:
+The example request targets the public httpbin service. Once configured, JSON
+responses are written to stdout with two-space indentation, while other
+response bodies are preserved byte-for-byte. Status and timing go to stderr,
+which keeps redirection clean:
 
 ```sh
 pnpm --silent reqs run requests/httpbin.json > response.json

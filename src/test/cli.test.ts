@@ -91,10 +91,11 @@ async function startServer(
   context: TestContext,
   statusCode: number,
   responseBody: Uint8Array,
+  contentType = "application/octet-stream",
 ): Promise<number> {
   const server = createServer((_request, response) => {
     response.writeHead(statusCode, {
-      "Content-Type": "application/octet-stream",
+      "Content-Type": contentType,
     });
     response.end(responseBody);
   });
@@ -166,6 +167,48 @@ test("writes response bytes to stdout and status to stderr", async (context) => 
 
   assert.equal(result.exitCode, 0);
   assert.deepStrictEqual(result.stdout, Buffer.from(responseBody));
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
+});
+
+test("pretty-prints JSON responses to stdout", async (context) => {
+  const responseBody = Buffer.from('{"users":[{"id":1,"active":true}]}');
+  const port = await startServer(
+    context,
+    200,
+    responseBody,
+    "application/json; charset=utf-8",
+  );
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "request.json");
+
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${port}/users`,
+    }),
+    "utf8",
+  );
+
+  const result = await runCli(["run", filePath]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(
+    result.stdout.toString("utf8"),
+    [
+      "{",
+      '  "users": [',
+      "    {",
+      '      "id": 1,',
+      '      "active": true',
+      "    }",
+      "  ]",
+      "}",
+      "",
+    ].join("\n"),
+  );
   assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
 });
 

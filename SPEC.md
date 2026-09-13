@@ -32,7 +32,8 @@ Inspected on 2026-09-13:
 | `examples/reqs.example.json` | Tracked placeholder project config showing environment-variable and Key Vault secret references |
 | `examples/httpbin.json` | Tracked placeholder request showing how a request selects an auth profile |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
-| `src/cli.ts` | `run <file>` loads and validates the request and nearest project config, resolves named auth, executes the request, writes body bytes to stdout, and writes status and timing to stderr |
+| `src/cli.ts` | `run <file>` loads and validates the request and nearest project config, resolves named auth, executes the request, pretty-prints valid JSON responses to stdout, and writes status and timing to stderr |
+| `src/core/format-response-body.ts` | Pretty-prints valid `application/json` and `+json` response bodies while preserving all other bytes |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
 | `src/core/project-config.ts` | Project config, environment and Key Vault secret references, and bearer/API-key auth profile types |
@@ -44,10 +45,11 @@ Inspected on 2026-09-13:
 | `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
 | `src/core/execute-request.ts` | Executes requests with headers, query values, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
 | `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
-| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, output behavior, relative file bodies, and environment-backed API-key auth end to end |
+| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, JSON and binary output behavior, relative file bodies, and environment-backed API-key auth end to end |
+| `src/test/format-response-body.test.ts` | Covers standard and structured JSON media types plus preservation of non-JSON and malformed bodies |
 | `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, failure sanitization, and credential application |
 
-The complete build and test commands completed successfully at this checkpoint. Eight test files declare 40 passing tests covering validation, loading, authentication, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The complete build and test commands completed successfully at this checkpoint. Nine test files declare 43 passing tests covering validation, loading, authentication, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
 Tracked configuration and request examples now contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. The local `requests/nba/boxscores_traditional.json` request was run successfully through the `nba` profile using a Key Vault-backed API key; the live API returned `200 OK` with a valid JSON body. This is a manual usage check only; automated tests remain independent of public services.
 
@@ -55,7 +57,7 @@ The earlier loader typo has been corrected to `loadRequestJson`. The validator's
 
 Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth2, Basic, general command providers, caching, and refresh are not implemented.
 
-The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
+The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated query values; and JSON, text, form, or file bodies. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -84,7 +86,7 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 ### 2. First request — working prototype complete
 
 - Implemented: JSON loading and request validation with focused validator tests.
-- Implemented: `run <file>` connects loading, validation, HTTP execution, raw response-body output, status/timing output, and HTTP failure exit status.
+- Implemented: `run <file>` connects loading, validation, HTTP execution, pretty JSON or byte-preserving non-JSON response output, status/timing output, and HTTP failure exit status.
 - Implemented: direct URLs, request headers, repeated query values, a finite timeout, disabled redirects, and binary-safe buffered response bodies.
 - Implemented: JSON, text, URL-encoded form, and file request bodies, including default content types and explicit header precedence.
 - Implemented: file body paths resolve relative to the request JSON file; GET and HEAD bodies are rejected.
@@ -281,10 +283,9 @@ The `resolveAuth` API is asynchronous because Key Vault lookup performs child-pr
 
 | Option | Behavior |
 | --- | --- |
-| Default | Body to stdout; status and timing to stderr |
+| Default | Pretty-print valid JSON responses to stdout; preserve other body bytes; write status and timing to stderr |
 | `--output <path>` | Write response body bytes to a file |
 | `--save-response` | Record body and metadata in local history |
-| `--pretty` | Format JSON display without modifying recorded bytes |
 | `--dry-run` | Show the resolved request with secrets redacted; do not execute auth commands or refresh |
 
 Recorded metadata includes a run ID, timestamp, request name, environment, redacted resolved method/URL, status, response headers, duration, body filename, and a redacted request configuration snapshot. Store the body separately to support binary data.
