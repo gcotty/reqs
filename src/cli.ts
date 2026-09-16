@@ -13,6 +13,7 @@ import { validateRequest } from "./core/validate-request.js";
 
 interface RunArguments {
   filePath: string;
+  pathOverrides: Map<string, string>;
   queryOverrides: Map<string, string>;
 }
 
@@ -20,39 +21,51 @@ function parseRunArguments(args: string[]): RunArguments {
   const filePath = args[0];
 
   if (filePath === undefined) {
-    throw new Error("Usage: reqs run <file> [--query name=value]");
+    throw new Error(
+      "Usage: reqs run <file> [--path name=value] [--query name=value]",
+    );
   }
 
+  const pathOverrides = new Map<string, string>();
   const queryOverrides = new Map<string, string>();
 
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index];
 
-    if (argument !== "--query") {
+    if (argument !== "--query" && argument !== "--path") {
       throw new Error(`Unknown run option: ${argument}`);
     }
 
     const assignment = args[index + 1];
 
     if (assignment === undefined) {
-      throw new Error("--query requires name=value");
+      throw new Error(`${argument} requires name=value`);
     }
 
     const separatorIndex = assignment.indexOf("=");
 
     if (separatorIndex <= 0) {
-      throw new Error("--query requires a non-empty name in name=value");
+      throw new Error(`${argument} requires a non-empty name in name=value`);
     }
 
     const name = assignment.slice(0, separatorIndex);
     const value = assignment.slice(separatorIndex + 1);
 
-    queryOverrides.set(name, value);
+    if (argument === "--path") {
+      if (value === "") {
+        throw new Error("--path requires a non-empty value in name=value");
+      }
+
+      pathOverrides.set(name, value);
+    } else {
+      queryOverrides.set(name, value);
+    }
     index += 1;
   }
 
   return {
     filePath,
+    pathOverrides,
     queryOverrides,
   };
 }
@@ -64,7 +77,9 @@ async function main(): Promise<void> {
     console.log("Usage: reqs <command>");
     console.log("");
     console.log("Commands:");
-    console.log(" run <file> [--query name=value] Run a saved HTTP request");
+    console.log(
+      " run <file> [--path name=value] [--query name=value] Run a saved HTTP request",
+    );
     return;
   }
 
@@ -72,7 +87,9 @@ async function main(): Promise<void> {
 
   if (command === "run") {
     try {
-      const { filePath, queryOverrides } = parseRunArguments(args.slice(1));
+      const { filePath, pathOverrides, queryOverrides } = parseRunArguments(
+        args.slice(1),
+      );
       const input = await loadRequestJson(filePath);
       const request = validateRequest(input);
 
@@ -82,6 +99,10 @@ async function main(): Promise<void> {
       const executeOptions: ExecuteRequestOptions = {
         requestFilePath: filePath,
       };
+
+      if (pathOverrides.size > 0) {
+        executeOptions.pathOverrides = pathOverrides;
+      }
 
       if (queryOverrides.size > 0) {
         executeOptions.queryOverrides = queryOverrides;

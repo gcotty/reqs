@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,7 +121,7 @@ test("reports a missing request-file argument", async () => {
   assert.equal(result.stdout.length, 0);
   assert.equal(
     result.stderr,
-    "Usage: reqs run <file> [--query name=value]\n",
+    "Usage: reqs run <file> [--path name=value] [--query name=value]\n",
   );
 });
 
@@ -148,6 +148,32 @@ test("reports invalid query override arguments", async () => {
     missingName.stderr,
     /--query requires a non-empty name in name=value/,
   );
+});
+
+test("reports invalid path override arguments", async () => {
+  const cases = [
+    { args: ["--path"], message: /--path requires name=value/ },
+    {
+      args: ["--path", "=value"],
+      message: /--path requires a non-empty name in name=value/,
+    },
+    {
+      args: ["--path", "name"],
+      message: /--path requires a non-empty name in name=value/,
+    },
+    {
+      args: ["--path", "name="],
+      message: /--path requires a non-empty value in name=value/,
+    },
+  ];
+
+  for (const { args, message } of cases) {
+    const result = await runCli(["run", "request.json", ...args]);
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout.length, 0);
+    assert.match(result.stderr, message);
+  }
 });
 
 test("reports an invalid request definition", async (context) => {
@@ -262,6 +288,58 @@ test("replaces or adds query parameters with last-value-wins", async (context) =
   assert.deepStrictEqual(query.getAll("format"), ["json"]);
   assert.deepStrictEqual(query.getAll("new"), ["value=with=equals"]);
   assert.deepStrictEqual(query.getAll("empty"), [""]);
+});
+
+test("mixes path and query overrides with last-value-wins", async (context) => {
+  let receivedUrl: string | undefined;
+
+  const server = createServer((request, response) => {
+    receivedUrl = request.url;
+    response.writeHead(200);
+    response.end("ok");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const filePath = join(directory, "request.json");
+  const savedRequest = JSON.stringify({
+    version: 1,
+    method: "GET",
+    url: `http://127.0.0.1:${address.port}/games/{gameId}/copy/{gameId}_hustlestats.xml?kept=url`,
+    query: { format: "json" },
+  });
+
+  await writeFile(filePath, savedRequest, "utf8");
+
+  const result = await runCli([
+    "run",
+    filePath,
+    "--path",
+    "gameId=first",
+    "--query",
+    "new=first",
+    "--path",
+    "gameId=final=value",
+    "--query",
+    "new=last",
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "ok");
+  assert.equal(
+    receivedUrl,
+    "/games/final%3Dvalue/copy/final%3Dvalue_hustlestats.xml?kept=url&format=json&new=last",
+  );
+  assert.equal(await readFile(filePath, "utf8"), savedRequest);
 });
 
 test("pretty-prints JSON responses to stdout", async (context) => {

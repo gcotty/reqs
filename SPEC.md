@@ -99,7 +99,7 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 
 - Implemented: nearest-ancestor project config discovery and runtime validation.
 - Implemented: temporary `--query name=value` overrides with last-value-wins behavior; saved request files are not modified.
-- Planned: URL path placeholders such as `/api/games/{gameId}` with temporary `--path gameId=value` overrides; saved request files are not modified.
+- Implemented: URL path placeholders such as `/api/games/{gameId}` and `/api/games/{gameId}_stats.xml` with temporary `--path gameId=value` overrides; saved request files are not modified.
 - Remaining: named request discovery, `init`, and `list`.
 - Remaining: named environments.
 - Dry-run output with secrets redacted.
@@ -200,13 +200,14 @@ reqs history users/get
 reqs history show <run-id>
 ```
 
-Query overrides affect only the current run. Users can edit JSON directly for other changes. Saving variants, an editor command, and automatic historical replay are deferred. Earlier brainstorming included `auth login`; interactive login is not part of the v1 commitment.
+Path and query overrides affect only the current run. Users can edit JSON directly for other changes. Saving variants, an editor command, and automatic historical replay are deferred. Earlier brainstorming included `auth login`; interactive login is not part of the v1 commitment.
 
 ## URL path overrides
 
-Request URLs may contain named path placeholders wrapped in braces. A temporary
-`--path name=value` option replaces a matching placeholder for one invocation
-without changing the saved request file:
+Request URLs may contain named path placeholders wrapped in braces. A placeholder
+can occupy a whole path segment or appear within one, as in
+`/{gameId}_hustlestats.xml`. A temporary `--path name=value` option replaces a
+matching placeholder for one invocation without changing the saved request file:
 
 ```json
 {
@@ -223,7 +224,7 @@ reqs run games/get --path gameId=2020900360
 - Each supplied name must match a placeholder in the URL path; unknown names are
   errors rather than silently becoming query parameters.
 - Every placeholder must have a value before execution. Missing values are
-  errors.
+  errors. Empty values, `.` and `..` are also rejected.
 - Placeholder values are encoded as one URL path segment, so values containing
   `/`, `?`, `#`, spaces, or other reserved characters cannot change the URL
   structure.
@@ -232,8 +233,8 @@ reqs run games/get --path gameId=2020900360
   wins.
 - Path overrides affect only the path. Existing URL query parameters and the
   request's `query` object retain their current behavior.
-- The placeholder syntax deliberately distinguishes a replaceable segment
-  (`{gameId}`) from ordinary literal path text (`gameId`).
+- Braced names are replaceable; ordinary path text without braces remains
+  literal. Both `/games/{gameId}` and `/games/{gameId}_stats.xml` work.
 
 ## Query overrides
 
@@ -374,4 +375,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request, temporary query-override, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `--query name=value` replaces every matching saved value or adds a missing parameter for one invocation, and the last CLI value wins when a name is repeated. Only query parameters are currently modifiable from the CLI; URL path placeholders and temporary `--path name=value` overrides are now specified but not implemented. The executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is URL path overrides, named environments, request discovery, `init`, and `list`. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The direct-request, temporary path- and query-override, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `--path name=value` fills braced placeholders in URL paths, including placeholders within a segment, while `--query name=value` replaces matching saved query values or adds a missing parameter. Repeated names use the last CLI value, and saved request files are unchanged. The executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is named environments, request discovery, `init`, and `list`. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.

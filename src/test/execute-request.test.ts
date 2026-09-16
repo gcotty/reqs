@@ -94,6 +94,70 @@ test("executes a request with headers and query overrides", async (context) => {
   assert.ok(durationMs >= 0);
 });
 
+test("fills repeated and embedded path placeholders without changing queries", async (context) => {
+  let receivedUrl: string | undefined;
+
+  const server = createServer((request, response) => {
+    receivedUrl = request.url;
+    response.writeHead(200);
+    response.end("ok");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  await executeRequest(
+    {
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${address.port}/games/{gameId}/copy/{gameId}_stats.xml?existing=url`,
+      query: { format: "json" },
+    },
+    { pathOverrides: new Map([["gameId", "a/b?c# d"]]) },
+  );
+
+  assert.equal(
+    receivedUrl,
+    "/games/a%2Fb%3Fc%23%20d/copy/a%2Fb%3Fc%23%20d_stats.xml?existing=url&format=json",
+  );
+});
+
+test("rejects missing, unknown, and invalid path values", async () => {
+  const request: RequestDefinition = {
+    version: 1,
+    method: "GET",
+    url: "https://example.com/games/{gameId}",
+  };
+
+  await assert.rejects(executeRequest(request), /Missing path value for "gameId"/);
+
+  await assert.rejects(
+    executeRequest(request, {
+      pathOverrides: new Map([
+        ["gameId", "123"],
+        ["wrong", "456"],
+      ]),
+    }),
+    /Unknown path placeholder: "wrong"/,
+  );
+
+  for (const value of ["", ".", ".."] as const) {
+    await assert.rejects(
+      executeRequest(request, {
+        pathOverrides: new Map([["gameId", value]]),
+      }),
+      /Invalid path value for "gameId"/,
+    );
+  }
+});
+
 test("sends each supported request body", async (context) => {
   interface RecordedRequest {
     body: Buffer;

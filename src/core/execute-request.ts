@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface ExecuteRequestOptions {
   auth?: ResolvedAuth;
+  pathOverrides?: ReadonlyMap<string, string>;
   queryOverrides?: ReadonlyMap<string, string>;
   requestFilePath?: string;
 }
@@ -26,6 +27,40 @@ interface PreparedBody {
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported request body: ${JSON.stringify(value)}`);
+}
+
+function applyPathOverrides(
+  url: URL,
+  overrides: ReadonlyMap<string, string> = new Map(),
+): void {
+  const matchedNames = new Set<string>();
+  const segments = url.pathname.split("/").map((segment) =>
+    segment.replace(/%7B([^/]+?)%7D/gi, (_placeholder, encodedName: string) => {
+      const name = decodeURIComponent(encodedName);
+      matchedNames.add(name);
+      const value = overrides.get(name);
+
+      if (value === undefined) {
+        throw new Error(`Missing path value for "${name}"`);
+      }
+
+      if (value === "" || value === "." || value === "..") {
+        throw new Error(
+          `Invalid path value for "${name}": must be non-empty and cannot be . or ..`,
+        );
+      }
+
+      return encodeURIComponent(value);
+    }),
+  );
+
+  for (const name of overrides.keys()) {
+    if (!matchedNames.has(name)) {
+      throw new Error(`Unknown path placeholder: "${name}"`);
+    }
+  }
+
+  url.pathname = segments.join("/");
 }
 
 async function prepareBody(
@@ -89,6 +124,8 @@ export async function executeRequest(
 
   const url = new URL(request.url);
   const headers = new Headers(request.headers);
+
+  applyPathOverrides(url, options.pathOverrides);
 
   if (request.query !== undefined) {
     for (const [name, value] of Object.entries(request.query)) {

@@ -48,6 +48,19 @@ all saved values; otherwise it is added. When the same name is provided more
 than once, the last CLI value wins. Values may be empty or contain additional
 `=` characters.
 
+For path values, put `{name}` in the saved URL (for example,
+`https://example.com/games/{gameId}_stats.xml`), then pass `--path name=value`:
+
+```sh
+pnpm reqs run requests/game.json --path gameId=123
+```
+
+Placeholders also work as a whole path segment, such as `/games/{gameId}`.
+Each placeholder needs a value. Unknown names, empty values, `.` and `..` are
+errors. Values are encoded so `/`, `?`, and `#` stay within the path value.
+Repeated `--path` options are allowed; the last value for a name wins. Path and
+query overrides do not change the saved request file.
+
 ## Personal requests
 
 Tracked samples live in `examples/`. The contents of `requests/` are ignored by
@@ -94,7 +107,7 @@ You can verify that the executable is available with:
 command -v kv
 ```
 
-Query parameter overrides are supported. Variables and overrides for other
+Path and query overrides are supported. Variables and overrides for other
 parts of a request are not implemented. See `SPEC.md` for the complete format,
 current limitations, and roadmap.
 
