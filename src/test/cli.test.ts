@@ -683,3 +683,116 @@ test("loads and applies a named API-key auth profile", async (context) => {
   assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/);
   assert.equal(receivedApiKey, "integration-secret");
 });
+
+test("runs a request with OAuth client credentials", async (context) => {
+  let receivedAuthorization: string | undefined;
+
+  const server = createServer((request, response) => {
+    receivedAuthorization = request.headers.authorization;
+    response.writeHead(200);
+    response.end("authenticated");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const requestFilePath = join(directory, "request.json");
+  const tokenRecordPath = join(directory, "token-request.json");
+  const fetchPreloadPath = join(directory, "mock-fetch.cjs");
+
+  await writeFile(
+    join(directory, "reqs.json"),
+    JSON.stringify({
+      version: 1,
+      auth: {
+        example: {
+          type: "oauth2ClientCredentials",
+          tokenUrl: "https://auth.example.test/connect/token",
+          scope: "api.read",
+          clientId: { env: "EXAMPLE_CLIENT_ID" },
+          clientSecret: { env: "EXAMPLE_CLIENT_SECRET" },
+        },
+      },
+    }),
+  );
+  await writeFile(
+    requestFilePath,
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${address.port}/resource`,
+      auth: "example",
+    }),
+  );
+  await writeFile(
+    fetchPreloadPath,
+    `const { writeFileSync } = require("node:fs");
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  if (String(input) === "https://auth.example.test/connect/token") {
+    writeFileSync(process.env.REQS_TOKEN_RECORD, JSON.stringify({
+      method: init.method,
+      contentType: new Headers(init.headers).get("content-type"),
+      body: String(init.body),
+    }));
+    if (process.env.REQS_TOKEN_STATUS === "401") {
+      return new Response("sensitive token body", { status: 401 });
+    }
+    return new Response(JSON.stringify({
+      access_token: "issued-token",
+      token_type: "Bearer",
+    }));
+  }
+  return originalFetch(input, init);
+};
+`,
+  );
+
+  const environment = {
+    EXAMPLE_CLIENT_ID: "example-id",
+    EXAMPLE_CLIENT_SECRET: "example-secret",
+    NODE_OPTIONS: `--require=${fetchPreloadPath}`,
+    REQS_TOKEN_RECORD: tokenRecordPath,
+  };
+  const result = await runCli(["run", requestFilePath], environment);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "authenticated");
+  assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/u);
+  assert.equal(receivedAuthorization, "Bearer issued-token");
+
+  const tokenRequest = JSON.parse(await readFile(tokenRecordPath, "utf8")) as {
+    method: string;
+    contentType: string;
+    body: string;
+  };
+  assert.equal(tokenRequest.method, "POST");
+  assert.equal(tokenRequest.contentType, "application/x-www-form-urlencoded");
+  assert.deepStrictEqual(Object.fromEntries(new URLSearchParams(tokenRequest.body)), {
+    grant_type: "client_credentials",
+    client_id: "example-id",
+    client_secret: "example-secret",
+    scope: "api.read",
+  });
+
+  const failure = await runCli(["run", requestFilePath], {
+    ...environment,
+    REQS_TOKEN_STATUS: "401",
+  });
+
+  assert.equal(failure.exitCode, 2);
+  assert.equal(failure.stdout.length, 0);
+  assert.equal(
+    failure.stderr,
+    "Failed to run request: OAuth token request failed with status 401\n",
+  );
+  assert.doesNotMatch(failure.stderr, /example-secret|sensitive token body/u);
+});

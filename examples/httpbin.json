@@ -1,8 +1,8 @@
 {
   "version": 1,
   "method": "GET",
-  "url": "https://httpbin.org/anything",
-  "auth": "example-key-vault",
+  "url": "https://httpbin.org/anything/{userId}",
+  "auth": "example",
   "query": {
     "example": "your-query-value",
     "include": ["first-value", "second-value"]

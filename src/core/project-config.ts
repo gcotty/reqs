@@ -21,7 +21,18 @@ export interface ApiKeyAuthProfile {
   value: SecretReference;
 }
 
-export type AuthProfile = BearerAuthProfile | ApiKeyAuthProfile;
+export interface OAuth2ClientCredentialsAuthProfile {
+  type: "oauth2ClientCredentials";
+  tokenUrl: string;
+  scope: string;
+  clientId: SecretReference;
+  clientSecret: SecretReference;
+}
+
+export type AuthProfile =
+  | BearerAuthProfile
+  | ApiKeyAuthProfile
+  | OAuth2ClientCredentialsAuthProfile;
 
 export interface ProjectConfig {
   version: 1;

@@ -8,6 +8,7 @@ import type {
   ProjectConfig,
   SecretReference,
 } from "./project-config.js";
+import { requestClientCredentialsToken } from "./request-client-credentials-token.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +27,7 @@ export type ResolvedAuth =
 export interface ResolveAuthOptions {
   env?: Readonly<Record<string, string | undefined>>;
   resolveKeyVaultSecret?: (secretName: string) => Promise<string>;
+  fetcher?: typeof fetch;
 }
 
 function assertNever(value: never): never {
@@ -144,6 +146,36 @@ export async function resolveAuth(
           keyVaultResolver,
         ),
       };
+
+    case "oauth2ClientCredentials": {
+      const clientId = await resolveSecretReference(
+        profile.clientId,
+        profileName,
+        env,
+        keyVaultResolver,
+      );
+      const clientSecret = await resolveSecretReference(
+        profile.clientSecret,
+        profileName,
+        env,
+        keyVaultResolver,
+      );
+      const accessToken = await requestClientCredentialsToken(
+        {
+          tokenUrl: profile.tokenUrl,
+          scope: profile.scope,
+          clientId,
+          clientSecret,
+        },
+        options.fetcher,
+      );
+
+      return {
+        location: "header",
+        name: "Authorization",
+        value: `Bearer ${accessToken}`,
+      };
+    }
 
     default:
       return assertNever(profile);

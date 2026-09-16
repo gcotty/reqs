@@ -12,6 +12,21 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
+function isHttpsUrl(value: unknown): value is string {
+  if (!isNonEmptyString(value)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" && url.username === "" && url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
 function validateSecretReference(
   value: unknown,
   description: string,
@@ -87,6 +102,34 @@ function validateAuthProfile(profileName: string, value: unknown): AuthProfile {
         value: validateSecretReference(
           value["value"],
           `Auth profile "${profileName}" value`,
+        ),
+      };
+    }
+
+    case "oauth2ClientCredentials": {
+      if (!isHttpsUrl(value["tokenUrl"])) {
+        throw new Error(
+          `Auth profile "${profileName}" tokenUrl must be a valid HTTPS URL`,
+        );
+      }
+
+      if (!isNonEmptyString(value["scope"])) {
+        throw new Error(
+          `Auth profile "${profileName}" scope must be a non-empty string`,
+        );
+      }
+
+      return {
+        type: "oauth2ClientCredentials",
+        tokenUrl: value["tokenUrl"],
+        scope: value["scope"],
+        clientId: validateSecretReference(
+          value["clientId"],
+          `Auth profile "${profileName}" clientId`,
+        ),
+        clientSecret: validateSecretReference(
+          value["clientSecret"],
+          `Auth profile "${profileName}" clientSecret`,
         ),
       };
     }

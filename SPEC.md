@@ -2,17 +2,16 @@
 
 ## Purpose
 
-Build a personal TypeScript CLI for reusable HTTP requests stored as JSON. Users should be able to revisit requests, change parameters, switch environments, manage authentication and token refresh, and optionally save responses.
+Build a personal TypeScript CLI for reusable HTTP requests stored as JSON. Users can revisit requests, change parameters for one run, and use named authentication profiles.
 
 Working name: `reqs`. Package and executable name availability has not been checked. Python was initially considered; TypeScript is the chosen implementation language.
 
-This document records the intended design, not a claim that every feature exists. Exact configuration schemas and unsettled details should be reviewed when their phase begins.
+This document records the working CLI, the final v1 token-cache gate, and a small backlog after v1.
 
 ## Collaboration and learning workflow
 
-- The user implements the code as a TypeScript learning exercise.
-- Present one file at a time, explain its purpose and relevant TypeScript concepts, and allow questions and review before moving on.
-- Do not implement future files automatically. Documentation edits may be explicitly delegated, as this file was.
+- Treat changes as a TypeScript learning exercise: present one file at a time and allow review before moving on.
+- Implement files when delegated, and explain the relevant choices.
 - Prefer a small working path, then expand it. Avoid introducing frameworks or abstractions before they help.
 - Use pnpm for installation and scripts.
 - Commit coherent working milestones after appropriate checks pass. The user handles commits and pushes unless explicitly delegating them.
@@ -26,11 +25,11 @@ Inspected on 2026-09-16:
 | `package.json` | Private ESM package; `reqs` bin points to `dist/cli.js`; includes build, repo-local CLI, typecheck, and test scripts |
 | `pnpm-lock.yaml` | Committed dependency lockfile |
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
-| `.gitignore` | Ignores dependencies, build output, local history, environment files, the root `reqs.json`, and the local personal `requests/` directory; allows `.env.example` |
+| `.gitignore` | Ignores dependencies, build output, local application state, environment files, the root `reqs.json`, and the local personal `requests/` directory; allows `.env.example` |
 | `reqs.json` | Ignored local project config; it may contain real environment-variable or Key Vault secret names without committing them |
-| `README.md` | Briefly lists implemented features, quick-start commands, a minimal request, and development checks |
-| `examples/reqs.example.json` | Tracked placeholder project config showing environment-variable and Key Vault secret references |
-| `examples/httpbin.json` | Tracked placeholder request showing how a request selects an auth profile |
+| `README.md` | Briefly lists implemented features, quick-start commands, a minimal request, a generic OAuth profile, and development checks |
+| `examples/reqs.example.json` | Tracked placeholder project config showing bearer, API-key, and OAuth client-credentials profiles with environment-variable and Key Vault secret references |
+| `examples/httpbin.json` | Tracked placeholder request showing a path parameter and named OAuth profile |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
 | `src/cli.ts` | `init` creates local project files; `list` prints saved request names; `run <file|name>` accepts path and query overrides, resolves named requests and auth, executes the request, and writes the response and status |
 | `src/core/format-response-body.ts` | Pretty-prints valid `application/json` and `+json` response bodies while preserving all other bytes |
@@ -38,28 +37,29 @@ Inspected on 2026-09-16:
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/request-discovery.ts` | Resolves names under the current directory's `requests/` folder and lists nested JSON requests in sorted order |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
-| `src/core/project-config.ts` | Project config, environment and Key Vault secret references, and bearer/API-key auth profile types |
+| `src/core/project-config.ts` | Project config, environment and Key Vault secret references, and bearer, API-key, and OAuth client-credentials auth profile types |
 | `src/core/load-project-config.ts` | Finds the nearest ancestor `reqs.json`, parses it, and provides an empty v1 config when no file exists |
 | `src/core/validate-project-config.ts` | Runtime validation for project config and supported auth profiles |
-| `src/core/resolve-auth.ts` | Resolves bearer and API-key profiles from environment variables or a `kv` executable on `PATH` |
+| `src/core/resolve-auth.ts` | Resolves bearer, API-key, and OAuth client-credentials profiles using environment variables or a `kv` executable on `PATH` |
+| `src/core/request-client-credentials-token.ts` | Sends an HTTPS form-encoded token request and validates a Bearer token response |
 | `src/core/apply-resolved-auth.ts` | Applies resolved credentials to prepared headers or query parameters |
 | `src/test/validate-request.test.ts` | Seven declared cases using hardcoded inputs and Node test/assert APIs |
 | `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
 | `src/core/execute-request.ts` | Executes requests with headers, path and query overrides, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
 | `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, path and query overrides, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
-| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers initialization, argument and validation errors, named requests and listing, overrides, response output, relative file bodies, and environment-backed API-key auth end to end |
+| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers initialization, argument and validation errors, named requests and listing, overrides, response output, relative file bodies, and API-key and OAuth auth end to end |
 | `src/test/format-response-body.test.ts` | Covers standard and structured JSON media types plus preservation of non-JSON and malformed bodies |
-| `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, failure sanitization, and credential application |
+| `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, `src/test/request-client-credentials-token.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, OAuth token exchange, failure sanitization, and credential application |
 
-The complete build and test commands completed successfully at this checkpoint. Nine test files declare 55 passing tests covering initialization, validation, loading, authentication, request discovery, overrides, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The latest TypeScript compilation and full automated suite passed: ten test files declare 64 passing tests. Transport and CLI tests use temporary loopback servers or mocked token responses rather than public network services. The user also confirmed that two live requests using the new OAuth profiles returned successfully; this is a manual usage check, not part of the automated suite.
 
-Tracked configuration and request examples now contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. The local `requests/nba/boxscores_traditional.json` request was run successfully through the `nba` profile using a Key Vault-backed API key; the live API returned `200 OK` with a valid JSON body. This is a manual usage check only; automated tests remain independent of public services.
+Tracked configuration and request examples contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. An API-key request also succeeded in an earlier live manual check.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-Authentication now works through named bearer and API-key profiles backed by environment variables or `{ "kv": "secret-name" }` references. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures the executable's stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. OAuth 2.0, Basic, general command providers, caching, and refresh are not implemented.
+Authentication works through named bearer, API-key, and OAuth 2.0 client-credentials profiles. Secret references use environment variables or `{ "kv": "secret-name" }`. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. OAuth profiles currently exchange the resolved client ID and secret for a Bearer token on every run. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. Persistent token caching is the final v1 gate.
 
-The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated saved query values; temporary CLI query overrides; and JSON, text, form, or file bodies. A query override replaces all matching values from both the saved URL and `query` object, or adds the parameter when it is absent. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures; separating those failures into the proposed exit codes remains future work.
+The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated saved query values; temporary CLI query overrides; and JSON, text, form, or file bodies. A query override replaces all matching values from both the saved URL and `query` object, or adds the parameter when it is absent. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures.
 
 Earlier commits included `node_modules`; a later commit removed it from tracking. The user has pushed this history and explicitly accepts leaving it intact. Do not rewrite history to remove those paths.
 
@@ -79,13 +79,13 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 
 ## Implementation phases
 
-### 1. Foundation — substantially complete
+### 1. Foundation — complete
 
 - Request types, package setup, strict compiler configuration, ignore rules.
 - Minimal CLI entry point with help and error exit status.
 - TypeScript concepts: literal types, recursive types, discriminated unions, optional properties, type-only imports.
 
-### 2. First request — working prototype complete
+### 2. First request — complete
 
 - Implemented: JSON loading and request validation with focused validator tests.
 - Implemented: `run <file>` connects loading, validation, HTTP execution, pretty JSON or byte-preserving non-JSON response output, status/timing output, and HTTP failure exit status.
@@ -94,39 +94,39 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 - Implemented: file body paths resolve relative to the request JSON file; GET and HEAD bodies are rejected.
 - Current CLI handling covers missing arguments, unreadable files, invalid JSON, and invalid request definitions at the CLI boundary.
 - Implemented: focused validation, loading, transport, and CLI tests using temporary local resources rather than external service dependencies.
-- Remaining polish: distinguish network and timeout failures from configuration failures at the CLI boundary.
-- During incremental implementation, reject unsupported configured features clearly rather than silently ignoring them.
 
-### 3. Reuse
+### 3. Reuse — complete
 
 - Implemented: nearest-ancestor project config discovery and runtime validation.
 - Implemented: temporary `--query name=value` overrides with last-value-wins behavior; saved request files are not modified.
 - Implemented: URL path placeholders such as `/api/games/{gameId}` and `/api/games/{gameId}_stats.xml` with temporary `--path gameId=value` overrides; saved request files are not modified.
 - Implemented: named request lookup under `requests/` and recursive `reqs list` output.
 - Implemented: `reqs init` creates a minimal local project without overwriting existing files.
-- Remaining: named environments.
-- Dry-run output with secrets redacted.
 
-### 4. Authentication — initial profiles working
+### 4. Authentication — token cache remaining for v1
 
 - Implemented: named bearer profiles using environment- or Key Vault-backed tokens.
 - Implemented: named API-key profiles targeting a configured header or query parameter.
 - Implemented: `{ "kv": "secret-name" }` references that safely execute the fixed `kv` helper and retain resolved secrets only in process memory.
-- Implemented: project config discovery, validation, secret resolution, credential application, and an end-to-end CLI integration test.
-- Next auth milestone: OAuth 2.0, initially covering refresh-token and client-credentials grants.
-- Later: Basic and command-based providers.
-- Remaining: local credential cache, expiration handling, refresh locking, atomic updates, and auth management commands.
+- Implemented: provider-neutral OAuth 2.0 client credentials with a configurable HTTPS token URL and scope, environment-variable or Key Vault client ID and secret references, and a Bearer token fetched for each run.
+- Implemented: project config discovery, validation, secret resolution, credential application, and end-to-end CLI integration tests.
 
-### 5. Recording
+## Final v1 gate: OAuth token cache
 
-- Body output to a file, opt-in response history, and history inspection.
-- Binary-safe body storage and redacted metadata.
+`reqs run` starts a new process for each request, so an in-memory cache would
+not help. Store client-credentials access tokens under the project's ignored
+`.reqs/` directory with private file permissions. Reuse a token only while its
+`expires_in` lifetime remains valid, with a short margin before expiry. Scope
+the cache by project and profile, and invalidate it when the token URL, scope,
+client ID, or client secret changes. Fetch a fresh token on a cache miss or
+near expiry. If the token response has no usable `expires_in`, use the token
+for that run without caching it. Keep tokens and credentials out of errors and
+tracked files. Test reuse across separate CLI runs and renewal after expiry.
 
-### 6. Finish
+## Future work
 
-- Consistent exit codes and useful error messages.
-- Focused integration tests, local executable setup, documentation, and packaging review.
-- Verify the supported Node version and choose/pin compatible tooling before declaring v1 complete.
+- File saving: consider `--output <path>` if shell redirection is insufficient, especially to avoid truncating an existing file when a run fails before receiving a response.
+- Response history: opt-in recording of response bodies and minimal redacted metadata, with commands to list and inspect saved runs.
 
 ## Request format
 
@@ -158,15 +158,14 @@ Request files are editable, versioned JSON and the source of truth. No database 
   - `{ "type": "text", "value": "..." }`
   - `{ "type": "form", "fields": { "key": "value" } }`
   - `{ "type": "file", "path": "./payload.bin" }`
-- Form bodies use URL-encoded fields; multipart is deferred.
+- Form bodies use URL-encoded fields; multipart is not supported.
 - The current validator accepts extra properties. It reconstructs the top-level request from recognized fields.
 - URL parsing happens during execution; the current validator only requires a nonempty string.
 - The recursive JSON guard is intended for parsed JSON, not arbitrary cyclic JavaScript objects.
-- A JSON Schema for editor assistance is a possible later addition; no schema file currently exists.
 
 ## Project and local state
 
-Target layout:
+Local layout:
 
 ```text
 reqs.json
@@ -174,36 +173,25 @@ requests/
   users/
     get.json
     create.json
-.reqs/
-  history/
 ```
 
-`reqs.json` currently supports `version: 1` and an optional `auth` object containing named bearer or API-key profiles. Bearer tokens and API-key values use either `{ "env": "VARIABLE_NAME" }` or `{ "kv": "secret-name" }` references. API keys specify `location: "header" | "query"` and a credential name. The nearest `reqs.json` at or above the request file is selected; a missing file behaves like `{ "version": 1 }`.
+`reqs.json` supports `version: 1` and an optional `auth` object containing named bearer, API-key, or OAuth 2.0 client-credentials profiles. Bearer tokens, API-key values, and OAuth client IDs and secrets use either `{ "env": "VARIABLE_NAME" }` or `{ "kv": "secret-name" }` references. OAuth scopes and token URLs belong to the profile; a request selects it with `"auth": "profile-name"`. API keys specify `location: "header" | "query"` and a credential name. The nearest `reqs.json` at or above the request file is selected; a missing file behaves like `{ "version": 1 }`.
 
-The root `reqs.json` is ignored because even secret names are treated as local information. A placeholder template is tracked at `examples/reqs.example.json`. Environment-backed secrets remain in the process environment; Key Vault-backed secrets travel from the `kv` helper's stdout into process memory and are not persisted by `reqs`. Future credential caches belong in local application state scoped by project, environment, and auth profile. Do not store tokens in committed configuration or request files.
+The root `reqs.json` is ignored because even secret names are treated as local information. A placeholder template is tracked at `examples/reqs.example.json`. Environment-variable-backed secrets remain in the process environment; Key Vault-backed secrets travel from the `kv` helper's stdout into process memory and are not persisted by `reqs`. Do not store tokens in committed configuration or request files.
 
-## Target CLI
+## CLI
 
 ```sh
 reqs init
 reqs list
-reqs run users/get --env dev
-reqs run ./requests/users/get.json --env dev
+reqs run users/get
+reqs run ./requests/users/get.json
 reqs run users/get --query include=teams
-reqs run games/get --path gameId=2020900360
-reqs run ./requests/nba/boxscores_traditional.json --query gameId=2020900360
-reqs run users/get --dry-run
-reqs run users/get --output user.json
-reqs run users/get --save-response
-reqs run users/get --pretty
-reqs auth status api --env dev
-reqs auth refresh api --env dev
-reqs auth clear api --env dev
-reqs history users/get
-reqs history show <run-id>
+reqs run users/get --path userId=123
+reqs run users/get > response.json
 ```
 
-Path and query overrides affect only the current run. Users can edit JSON directly for other changes. Saving variants, an editor command, and automatic historical replay are deferred. Earlier brainstorming included `auth login`; interactive login is not part of the v1 commitment.
+`init`, `list`, `run`, and the `--path` and `--query` run options are implemented. Status and timing go to stderr, so shell redirection saves the response body. Path and query overrides affect only the current run; users edit JSON directly for persistent changes.
 
 ## Named requests
 
@@ -225,7 +213,7 @@ Conflicting paths, such as a regular file named `requests`, are errors.
 
 Request URLs may contain named path placeholders wrapped in braces. A placeholder
 can occupy a whole path segment or appear within one, as in
-`/{gameId}_hustlestats.xml`. A temporary `--path name=value` option replaces a
+`/{gameId}_stats.xml`. A temporary `--path name=value` option replaces a
 matching placeholder for one invocation without changing the saved request file:
 
 ```json
@@ -237,7 +225,7 @@ matching placeholder for one invocation without changing the saved request file:
 ```
 
 ```sh
-reqs run games/get --path gameId=2020900360
+reqs run games/get --path gameId=123
 ```
 
 - Each supplied name must match a placeholder in the URL path; unknown names are
@@ -266,17 +254,15 @@ reqs run games/get --path gameId=2020900360
 - URL query encoding is handled by `URLSearchParams`.
 - Saved query arrays remain unchanged when their name is not overridden.
 - Query-based auth is applied afterward and replaces a conflicting CLI value so a CLI override cannot replace a configured credential.
-- Overrides are generic and request-defined rather than endpoint-specific. For example, `--query gameId=2020900360` replaces the saved `gameId` in `requests/nba/boxscores_traditional.json` for that invocation only; it does not modify the request file.
+- Overrides are generic and request-defined rather than endpoint-specific. For example, `--query page=2` replaces a saved `page` value for that invocation only; it does not modify the request file.
 
-## Authentication and refresh
+## Authentication
 
 | Profile | Current status |
 | --- | --- |
-| Basic | Planned; username and password references |
 | Bearer | Implemented with environment-variable or Key Vault token references |
 | API key | Implemented for configured header or query placement with environment-variable or Key Vault value references |
-| OAuth 2.0 | Next auth milestone; refresh-token and client-credentials grants |
-| Command | Planned; explicit executable and argument list returning a token |
+| OAuth 2.0 | Client credentials implemented; a token is fetched for each run |
 
 Example secret references:
 
@@ -302,54 +288,52 @@ a shell alias or function alone will not work. It must accept exactly one secret
 name, return a nonzero status on failure, and write only the secret value to
 stdout.
 
-Command providers run an executable with arguments rather than a shell string. Proposed stdout contract:
+The implemented OAuth 2.0 client credentials profile configures a token URL,
+scope, and client ID and secret references using the existing environment
+variable or Key Vault forms. Requests select a profile by name, such as
+`"auth": "example"`. The profile shape is:
 
 ```json
 {
-  "access_token": "...",
-  "expires_at": "2026-09-07T18:00:00Z"
+  "type": "oauth2ClientCredentials",
+  "tokenUrl": "https://auth.example.com/connect/token",
+  "scope": "api.read",
+  "clientId": { "env": "EXAMPLE_CLIENT_ID" },
+  "clientSecret": { "env": "EXAMPLE_CLIENT_SECRET" }
 }
 ```
 
-Auth providers should apply credentials, refresh when supported, and persist updated state:
+The token URL must use HTTPS and must not contain embedded credentials. Each
+run sends `grant_type=client_credentials`, `client_id`, `client_secret`, and
+`scope` as `application/x-www-form-urlencoded` data. Redirects are rejected.
+The response must be JSON with a nonempty `access_token` and Bearer
+`token_type`. The resulting `Authorization: Bearer` header is applied to the
+request. Currently each invocation obtains a new token; `expires_in` is not
+used yet. Token request errors omit credentials and response bodies. Two live
+OAuth requests have returned successfully with separate profile values.
 
-1. Reuse valid cached credentials.
-2. Refresh shortly before known expiration.
-3. Lock refresh operations and atomically persist updates, including rotated refresh tokens.
-4. On an eligible 401, permit at most one refresh and retry.
-5. Automatically replay only GET/HEAD by default. Other methods require explicit request configuration and a replayable body.
-6. Report refresh failures without indefinite retries.
+The `resolveAuth` API is asynchronous because Key Vault lookup and OAuth token
+acquisition perform I/O. Resolved auth is represented separately from profile
+configuration and then applied to prepared headers or URL query parameters.
 
-OAuth 2.0 is the next authentication feature to implement. Refresh-token profiles initially accept a refresh token from a configured secret reference, and client-credentials profiles obtain an access token without interactive login. Browser login, PKCE, and device authorization are deferred. Exact profile fields, cache storage details, refresh skew, and replay opt-in syntax remain implementation decisions.
+## Output and transport
 
-The `resolveAuth` API is asynchronous because Key Vault lookup performs child-process I/O. This also preserves the same caller contract when OAuth 2.0 and general command providers are added later. Resolved auth is represented separately from profile configuration and then applied to prepared headers or URL query parameters.
+Valid JSON responses are pretty-printed to stdout. Other response bodies are
+preserved as bytes. Status and timing go to stderr, so `>` can save a response
+body without including the status line. HTTP error response bodies are also
+written to stdout.
 
-## Output, history, and transport
+Node's built-in `fetch` uses a 30-second request timeout, TLS verification,
+disabled redirects, no automatic retries, and an in-memory `Uint8Array`
+response body. OAuth token acquisition has a 10-second timeout.
 
-| Option | Behavior |
-| --- | --- |
-| Default | Pretty-print valid JSON responses to stdout; preserve other body bytes; write status and timing to stderr |
-| `--output <path>` | Write response body bytes to a file |
-| `--save-response` | Record body and metadata in local history |
-| `--dry-run` | Show the resolved request with secrets redacted; do not execute auth commands or refresh |
-
-Recorded metadata includes a run ID, timestamp, request name, environment, redacted resolved method/URL, status, response headers, duration, body filename, and a redacted request configuration snapshot. Store the body separately to support binary data.
-
-Redact authorization and cookie headers and configured API-key locations. Saved response bodies remain as received, so response recording is opt-in.
-
-Transport defaults: finite timeout, TLS verification enabled, redirects disabled unless requested, and no general automatic retries. The initial implementation uses Node's built-in `fetch` with a 30-second timeout, manual redirect handling, and an in-memory `Uint8Array` response body. Revisit buffering versus streaming before supporting potentially large response and output files. No CLI framework has been chosen.
-
-Proposed exit codes:
+Current exit codes:
 
 | Code | Meaning |
 | --- | --- |
 | 0 | HTTP response below 400 |
 | 1 | HTTP response 400 or above |
-| 2 | Invalid configuration or CLI arguments |
-| 3 | Network or timeout failure |
-| 4 | Auth acquisition or refresh failure |
-
-HTTP error responses still print or save their bodies. Handle loading and execution errors at the CLI boundary rather than printing from core helpers.
+| 2 | CLI, configuration, auth acquisition, network, or timeout error |
 
 ## Architecture
 
@@ -357,41 +341,33 @@ Keep argument parsing separate from the core:
 
 ```text
 parse CLI → load → validate → resolve auth
-          → execute (saved query → overrides → auth) → render / record
+          → execute (saved query → overrides → auth) → render
 ```
 
-Use discriminated unions for request bodies and auth profiles, and runtime validation at external-data boundaries. The initial path can send one request at a time; asynchronous Node I/O does not require a concurrent runner.
+Use discriminated unions for request bodies and auth profiles, and runtime validation at external-data boundaries. The CLI sends one request at a time.
 
-## Definition of done
+## V1 completion
 
-V1 is complete when a user can:
+The current CLI lets a user:
 
 - Save a request as JSON and run it by path or name.
-- Run it against two environments and override query parameters without editing the file.
-- Use the agreed auth profiles and obtain or refresh credentials where supported.
-- Pipe the response body into another command.
-- Optionally write a body file or save and inspect response history.
-- Receive predictable errors and exit codes.
+- Override path and query parameters for one run without editing the file.
+- Use bearer, API-key, and OAuth 2.0 client credentials profiles.
+- Pipe or redirect the response body while status and timing go to stderr.
+- Distinguish HTTP error responses from CLI or execution errors by exit code.
 
-Relevant checks must pass, and setup and usage must be documented. Advanced features are not prerequisites for this milestone.
-
-## Longer-term possibilities
-
-- Saved variants (`--save-as`) and an editor command.
-- Template variables for changing other request fields without editing the file.
-- Multipart uploads and cookie persistence.
-- Collections and batch execution.
-- Assertions and scripting hooks.
-- Browser login, PKCE, and device authorization.
-- Postman import.
-- Historical replay with explicit stale-credential and side-effect semantics.
-- TUI or web UI.
-- Public package distribution and richer editor schema support.
-
-These are possibilities, not commitments for v1.
+The automated suite passed with 64 tests, and live OAuth requests succeeded.
+V1 is complete after the persistent OAuth token cache is implemented and
+verified. File saving and response history remain outside v1.
 
 ## Resume here
 
-Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
+Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time review workflow.
 
-The direct-request, temporary path- and query-override, project initialization, named request lookup and listing, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `reqs init` creates the minimal local layout and Git ignore rules. `reqs run users/get` resolves `requests/users/get.json`, while `reqs list` prints saved names. `--path name=value` fills braced placeholders in URL paths, including placeholders within a segment, while `--query name=value` replaces matching saved query values or adds a missing parameter. Repeated names use the last CLI value, and saved request files are unchanged. The executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is named environments. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The current CLI supports the endpoint collection and testing workflow. The
+root `reqs.json` and personal `requests/` directory are ignored; tracked
+examples contain placeholders only. OAuth profiles obtain a fresh token for
+each run. Implement persistent OAuth token caching as the final v1 gate, then
+consider file saving and opt-in response history. Shell redirection already
+saves stdout, so `--output` should be added only if its file handling provides
+a clear benefit.

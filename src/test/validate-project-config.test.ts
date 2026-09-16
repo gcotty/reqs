@@ -41,6 +41,23 @@ test("accepts a project config without auth profiles", () => {
   });
 });
 
+test("accepts an OAuth client credentials profile", () => {
+  const input = {
+    version: 1,
+    auth: {
+      example: {
+        type: "oauth2ClientCredentials",
+        tokenUrl: "https://auth.example.test/connect/token",
+        scope: "api.read",
+        clientId: { env: "EXAMPLE_CLIENT_ID" },
+        clientSecret: { kv: "example-client-secret" },
+      },
+    },
+  };
+
+  assert.deepStrictEqual(validateProjectConfig(input), input);
+});
+
 test("rejects invalid project config roots and versions", () => {
   for (const input of [null, [], "config", 42]) {
     assert.throws(
@@ -143,6 +160,58 @@ test("rejects invalid API-key configuration", () => {
         },
       }),
     /Auth profile "nba" name must be a non-empty string/,
+  );
+});
+
+test("rejects invalid OAuth client credentials configuration", () => {
+  const profile = {
+    type: "oauth2ClientCredentials",
+    tokenUrl: "https://auth.example.test/connect/token",
+    scope: "api.read",
+    clientId: { env: "EXAMPLE_CLIENT_ID" },
+    clientSecret: { env: "EXAMPLE_CLIENT_SECRET" },
+  };
+
+  for (const tokenUrl of [
+    "not-a-url",
+    "http://auth.example.test/token",
+    "https://user:password@auth.example.test/token",
+  ]) {
+    assert.throws(
+      () =>
+        validateProjectConfig({
+          version: 1,
+          auth: { example: { ...profile, tokenUrl } },
+        }),
+      /Auth profile "example" tokenUrl must be a valid HTTPS URL/u,
+    );
+  }
+
+  assert.throws(
+    () =>
+      validateProjectConfig({
+        version: 1,
+        auth: { example: { ...profile, scope: " " } },
+      }),
+    /Auth profile "example" scope must be a non-empty string/u,
+  );
+
+  assert.throws(
+    () =>
+      validateProjectConfig({
+        version: 1,
+        auth: { example: { ...profile, clientId: { env: "" } } },
+      }),
+    /Auth profile "example" clientId must reference a non-empty environment variable/u,
+  );
+
+  assert.throws(
+    () =>
+      validateProjectConfig({
+        version: 1,
+        auth: { example: { ...profile, clientSecret: { kv: "" } } },
+      }),
+    /Auth profile "example" clientSecret must reference a non-empty Key Vault secret name/u,
   );
 });
 

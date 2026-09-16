@@ -1,6 +1,17 @@
 {
   "version": 1,
   "auth": {
+    "example": {
+      "type": "oauth2ClientCredentials",
+      "tokenUrl": "https://auth.example.com/connect/token",
+      "scope": "api.read",
+      "clientId": {
+        "env": "EXAMPLE_CLIENT_ID"
+      },
+      "clientSecret": {
+        "env": "EXAMPLE_CLIENT_SECRET"
+      }
+    },
     "example-env": {
       "type": "bearer",
       "token": {

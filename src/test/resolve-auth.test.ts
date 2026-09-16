@@ -37,6 +37,17 @@ const config: ProjectConfig = {
         kv: "warehouse-api-key",
       },
     },
+    oauth: {
+      type: "oauth2ClientCredentials",
+      tokenUrl: "https://auth.example.test/connect/token",
+      scope: "api.read",
+      clientId: {
+        env: "EXAMPLE_CLIENT_ID",
+      },
+      clientSecret: {
+        kv: "example-client-secret",
+      },
+    },
   },
 };
 
@@ -52,6 +63,54 @@ test("resolves a bearer token into an Authorization header", async () => {
     name: "Authorization",
     value: "Bearer secret-token",
   });
+});
+
+test("resolves OAuth client credentials into a Bearer header", async () => {
+  let requestedSecretName: string | undefined;
+
+  const result = await resolveAuth("oauth", config, {
+    env: { EXAMPLE_CLIENT_ID: "example-id" },
+    resolveKeyVaultSecret: async (secretName) => {
+      requestedSecretName = secretName;
+      return "example-secret\r\n";
+    },
+    fetcher: async (input, init) => {
+      assert.equal(String(input), "https://auth.example.test/connect/token");
+      assert.ok(init?.body instanceof URLSearchParams);
+      assert.equal(init.body.get("grant_type"), "client_credentials");
+      assert.equal(init.body.get("scope"), "api.read");
+      assert.equal(init.body.get("client_id"), "example-id");
+      assert.equal(init.body.get("client_secret"), "example-secret");
+
+      return new Response(
+        JSON.stringify({ access_token: "issued-token", token_type: "Bearer" }),
+      );
+    },
+  });
+
+  assert.equal(requestedSecretName, "example-client-secret");
+  assert.deepStrictEqual(result, {
+    location: "header",
+    name: "Authorization",
+    value: "Bearer issued-token",
+  });
+});
+
+test("does not request an OAuth token when credentials are missing", async () => {
+  let fetchCalled = false;
+
+  await assert.rejects(
+    resolveAuth("oauth", config, {
+      env: {},
+      fetcher: async () => {
+        fetchCalled = true;
+        throw new Error("fetch should not be called");
+      },
+    }),
+    /Environment variable EXAMPLE_CLIENT_ID for auth profile "oauth" must be set and non-empty/u,
+  );
+
+  assert.equal(fetchCalled, false);
 });
 
 test("resolves an API key into a configured header", async () => {
