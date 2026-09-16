@@ -72,6 +72,18 @@ cp examples/httpbin.json requests/my-request.json
 pnpm reqs run requests/my-request.json
 ```
 
+From the project directory, you can list requests and run them by name. The
+name is the path under `requests/` without `.json`; for example,
+`requests/nba/hustle_stats.json` is `nba/hustle_stats`:
+
+```sh
+pnpm reqs list
+pnpm reqs run my-request
+pnpm reqs run nba/hustle_stats --path gameId=123
+```
+
+Explicit file paths still work, as shown above.
+
 ## Request format
 
 ```json

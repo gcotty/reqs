@@ -19,6 +19,7 @@ interface CliResult {
 function runCli(
   args: string[],
   envOverrides: Record<string, string> = {},
+  workingDirectory?: string,
 ): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const childEnvironment = {
@@ -30,6 +31,7 @@ function runCli(
     const child = spawn(process.execPath, [cliPath, ...args], {
       env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
+      ...(workingDirectory === undefined ? {} : { cwd: workingDirectory }),
     });
 
     const stdoutChunks: Buffer[] = [];
@@ -121,8 +123,31 @@ test("reports a missing request-file argument", async () => {
   assert.equal(result.stdout.length, 0);
   assert.equal(
     result.stderr,
-    "Usage: reqs run <file> [--path name=value] [--query name=value]\n",
+    "Usage: reqs run <file|name> [--path name=value] [--query name=value]\n",
   );
+});
+
+test("lists nested saved requests by name", async (context) => {
+  const directory = await createTempDirectory(context);
+  const requestsDirectory = join(directory, "requests");
+  const nestedDirectory = join(requestsDirectory, "nba");
+
+  await mkdir(nestedDirectory, { recursive: true });
+  await writeFile(join(requestsDirectory, "root.json"), "{}");
+  await writeFile(join(nestedDirectory, "z.json"), "{}");
+  await writeFile(join(nestedDirectory, "a.json"), "{}");
+  await writeFile(join(nestedDirectory, "notes.txt"), "ignored");
+
+  const result = await runCli(["list"], {}, directory);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, "");
+  assert.equal(result.stdout.toString("utf8"), "nba/a\nnba/z\nroot\n");
+
+  const invalid = await runCli(["list", "extra"], {}, directory);
+
+  assert.equal(invalid.exitCode, 2);
+  assert.equal(invalid.stderr, "Usage: reqs list\n");
 });
 
 test("reports invalid query override arguments", async () => {
@@ -340,6 +365,48 @@ test("mixes path and query overrides with last-value-wins", async (context) => {
     "/games/final%3Dvalue/copy/final%3Dvalue_hustlestats.xml?kept=url&format=json&new=last",
   );
   assert.equal(await readFile(filePath, "utf8"), savedRequest);
+});
+
+test("runs a nested saved request by name", async (context) => {
+  let receivedUrl: string | undefined;
+
+  const server = createServer((request, response) => {
+    receivedUrl = request.url;
+    response.writeHead(200);
+    response.end("ok");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => closeServer(server));
+
+  const address = server.address();
+
+  if (address === null || typeof address === "string") {
+    throw new Error("Test server did not listen on a TCP port");
+  }
+
+  const directory = await createTempDirectory(context);
+  const requestsDirectory = join(directory, "requests", "nba");
+  await mkdir(requestsDirectory, { recursive: true });
+  await writeFile(
+    join(requestsDirectory, "hustle_stats.json"),
+    JSON.stringify({
+      version: 1,
+      method: "GET",
+      url: `http://127.0.0.1:${address.port}/games/{gameId}_stats.xml`,
+    }),
+  );
+
+  const result = await runCli(
+    ["run", "nba/hustle_stats", "--path", "gameId=123"],
+    {},
+    directory,
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "ok");
+  assert.equal(receivedUrl, "/games/123_stats.xml");
 });
 
 test("pretty-prints JSON responses to stdout", async (context) => {

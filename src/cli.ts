@@ -7,6 +7,10 @@ import {
 import { formatResponseBody } from "./core/format-response-body.js";
 import { loadProjectConfigJson } from "./core/load-project-config.js";
 import { loadRequestJson } from "./core/load-request.js";
+import {
+  listRequestNames,
+  resolveRequestFilePath,
+} from "./core/request-discovery.js";
 import { resolveAuth } from "./core/resolve-auth.js";
 import { validateProjectConfig } from "./core/validate-project-config.js";
 import { validateRequest } from "./core/validate-request.js";
@@ -22,7 +26,7 @@ function parseRunArguments(args: string[]): RunArguments {
 
   if (filePath === undefined) {
     throw new Error(
-      "Usage: reqs run <file> [--path name=value] [--query name=value]",
+      "Usage: reqs run <file|name> [--path name=value] [--query name=value]",
     );
   }
 
@@ -78,18 +82,44 @@ async function main(): Promise<void> {
     console.log("");
     console.log("Commands:");
     console.log(
-      " run <file> [--path name=value] [--query name=value] Run a saved HTTP request",
+      " run <file|name> [--path name=value] [--query name=value] Run a saved HTTP request",
     );
+    console.log(" list List saved requests");
     return;
   }
 
   const command = args[0];
 
+  if (command === "list") {
+    try {
+      if (args.length !== 1) {
+        throw new Error("Usage: reqs list");
+      }
+
+      const names = await listRequestNames();
+
+      if (names.length > 0) {
+        process.stdout.write(`${names.join("\n")}\n`);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      console.error(
+        message.startsWith("Usage:")
+          ? message
+          : `Failed to list requests: ${message}`,
+      );
+      process.exitCode = 2;
+    }
+
+    return;
+  }
+
   if (command === "run") {
     try {
-      const { filePath, pathOverrides, queryOverrides } = parseRunArguments(
-        args.slice(1),
-      );
+      const { filePath: inputPath, pathOverrides, queryOverrides } =
+        parseRunArguments(args.slice(1));
+      const filePath = await resolveRequestFilePath(inputPath);
       const input = await loadRequestJson(filePath);
       const request = validateRequest(input);
 
