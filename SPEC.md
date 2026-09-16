@@ -28,12 +28,13 @@ Inspected on 2026-09-16:
 | `tsconfig.json` | Strict NodeNext compilation, ES2022 target, `src` to `dist` |
 | `.gitignore` | Ignores dependencies, build output, local history, environment files, the root `reqs.json`, and the local personal `requests/` directory; allows `.env.example` |
 | `reqs.json` | Ignored local project config; it may contain real environment-variable or Key Vault secret names without committing them |
-| `README.md` | Documents setup, repo-local CLI usage, placeholder templates, personal request storage, request shapes, limitations, and development checks |
+| `README.md` | Briefly lists implemented features, quick-start commands, a minimal request, and development checks |
 | `examples/reqs.example.json` | Tracked placeholder project config showing environment-variable and Key Vault secret references |
 | `examples/httpbin.json` | Tracked placeholder request showing how a request selects an auth profile |
 | `src/core/request.ts` | HTTP methods, recursive JSON values, body union, and request definition |
-| `src/cli.ts` | `run <file|name>` accepts temporary path and query overrides, resolves named requests, loads and validates the request and nearest project config, resolves named auth, executes the request, and writes the response and status; `list` prints saved request names |
+| `src/cli.ts` | `init` creates local project files; `list` prints saved request names; `run <file|name>` accepts path and query overrides, resolves named requests and auth, executes the request, and writes the response and status |
 | `src/core/format-response-body.ts` | Pretty-prints valid `application/json` and `+json` response bodies while preserving all other bytes |
+| `src/core/init-project.ts` | Initializes a minimal local config and request directory, adds missing Git ignore rules, and leaves existing project content untouched |
 | `src/core/load-request.ts` | Reads UTF-8 text and parses JSON, returning `Promise<unknown>` |
 | `src/core/request-discovery.ts` | Resolves names under the current directory's `requests/` folder and lists nested JSON requests in sorted order |
 | `src/core/validate-request.ts` | Runtime validation using handwritten type guards |
@@ -46,11 +47,11 @@ Inspected on 2026-09-16:
 | `src/test/load-request.test.ts` | Covers successful parsing, malformed JSON, and missing files using temporary directories |
 | `src/core/execute-request.ts` | Executes requests with headers, path and query overrides, resolved auth, and JSON, text, form, or file bodies; uses a 30-second timeout, disables automatic redirects, buffers response bytes, and measures total response time |
 | `src/test/execute-request.test.ts` | Uses a local HTTP server to cover transport behavior, path and query overrides, every body type, content-type precedence, relative file paths, and GET/HEAD body rejection |
-| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers argument and validation errors, named requests and listing, overrides, JSON and binary output behavior, relative file bodies, and environment-backed API-key auth end to end |
+| `src/test/cli.test.ts` | Runs the compiled CLI as a child process and covers initialization, argument and validation errors, named requests and listing, overrides, response output, relative file bodies, and environment-backed API-key auth end to end |
 | `src/test/format-response-body.test.ts` | Covers standard and structured JSON media types plus preservation of non-JSON and malformed bodies |
 | `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, failure sanitization, and credential application |
 
-The complete build and test commands completed successfully at this checkpoint. Nine test files declare 51 passing tests covering validation, loading, authentication, request discovery, overrides, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
+The complete build and test commands completed successfully at this checkpoint. Nine test files declare 55 passing tests covering initialization, validation, loading, authentication, request discovery, overrides, output formatting, transport, and end-to-end CLI behavior. Transport and CLI tests use temporary loopback servers rather than public network services.
 
 Tracked configuration and request examples now contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. The local `requests/nba/boxscores_traditional.json` request was run successfully through the `nba` profile using a Key Vault-backed API key; the live API returned `200 OK` with a valid JSON body. This is a manual usage check only; automated tests remain independent of public services.
 
@@ -102,7 +103,7 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 - Implemented: temporary `--query name=value` overrides with last-value-wins behavior; saved request files are not modified.
 - Implemented: URL path placeholders such as `/api/games/{gameId}` and `/api/games/{gameId}_stats.xml` with temporary `--path gameId=value` overrides; saved request files are not modified.
 - Implemented: named request lookup under `requests/` and recursive `reqs list` output.
-- Remaining: `init`.
+- Implemented: `reqs init` creates a minimal local project without overwriting existing files.
 - Remaining: named environments.
 - Dry-run output with secrets redacted.
 
@@ -210,6 +211,15 @@ From the project directory, `reqs run users/get` loads
 `requests/users/get.json`. `reqs list` prints the names of JSON files under
 `requests/`, including nested folders, in sorted order. Explicit file paths
 remain valid, and an existing direct file takes precedence over a name.
+
+## Project initialization
+
+`reqs init` works in the current directory. It creates `reqs.json` containing
+`{ "version": 1 }` and an empty `requests/` directory when they are absent. It
+adds missing `/reqs.json`, `requests/`, and `.reqs/` rules to `.gitignore`,
+preserving existing content. Existing config and request files are not
+overwritten, and a second run reports that the project is already initialized.
+Conflicting paths, such as a regular file named `requests`, are errors.
 
 ## URL path overrides
 
@@ -384,4 +394,4 @@ These are possibilities, not commitments for v1.
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time teaching workflow, but showing the complete contents of the current file is welcome. The user writes the implementation by hand unless they explicitly delegate an edit.
 
-The direct-request, temporary path- and query-override, named request lookup and listing, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `reqs run users/get` resolves `requests/users/get.json`, while `reqs list` prints saved names. `--path name=value` fills braced placeholders in URL paths, including placeholders within a segment, while `--query name=value` replaces matching saved query values or adds a missing parameter. Repeated names use the last CLI value, and saved request files are unchanged. The executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is named environments and `init`. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.
+The direct-request, temporary path- and query-override, project initialization, named request lookup and listing, and initial environment- and Key Vault-backed authentication checkpoints are complete. The root `reqs.json` and personal `requests/` directory are ignored; tracked examples contain placeholders only. `reqs init` creates the minimal local layout and Git ignore rules. `reqs run users/get` resolves `requests/users/get.json`, while `reqs list` prints saved names. `--path name=value` fills braced placeholders in URL paths, including placeholders within a segment, while `--query name=value` replaces matching saved query values or adds a missing parameter. Repeated names use the last CLI value, and saved request files are unchanged. The executor continues to reject configured `vars`. Query-based auth is applied after overrides and therefore wins a name collision. The next authentication pass should implement OAuth 2.0, initially for refresh-token and client-credentials grants. The next reuse work is named environments. After those features, separate auth, network, and timeout failures from configuration failures; all currently exit with code 2.

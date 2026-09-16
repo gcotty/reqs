@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,6 +148,87 @@ test("lists nested saved requests by name", async (context) => {
 
   assert.equal(invalid.exitCode, 2);
   assert.equal(invalid.stderr, "Usage: reqs list\n");
+});
+
+test("initializes a project and leaves it unchanged on a second run", async (context) => {
+  const directory = await createTempDirectory(context);
+
+  const first = await runCli(["init"], {}, directory);
+
+  assert.equal(first.exitCode, 0);
+  assert.equal(first.stderr, "");
+  assert.equal(
+    first.stdout.toString("utf8"),
+    "Created reqs.json\nCreated requests/\nCreated .gitignore\n",
+  );
+  assert.equal(
+    await readFile(join(directory, "reqs.json"), "utf8"),
+    '{\n  "version": 1\n}\n',
+  );
+  assert.equal(
+    await readFile(join(directory, ".gitignore"), "utf8"),
+    "/reqs.json\nrequests/\n.reqs/\n",
+  );
+  assert.equal((await stat(join(directory, "requests"))).isDirectory(), true);
+
+  const second = await runCli(["init"], {}, directory);
+
+  assert.equal(second.exitCode, 0);
+  assert.equal(second.stderr, "");
+  assert.equal(second.stdout.toString("utf8"), "Already initialized\n");
+});
+
+test("preserves existing project files and adds only missing ignore rules", async (context) => {
+  const directory = await createTempDirectory(context);
+  const config = '{"version":1,"auth":{"saved":"custom"}}\n';
+  const request = '{"saved":true}\n';
+  const requestsDirectory = join(directory, "requests");
+
+  await mkdir(requestsDirectory);
+  await writeFile(join(directory, "reqs.json"), config);
+  await writeFile(join(requestsDirectory, "keep.json"), request);
+  await writeFile(join(directory, ".gitignore"), "node_modules/\n/reqs.json\n");
+
+  const result = await runCli(["init"], {}, directory);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout.toString("utf8"), "Updated .gitignore\n");
+  assert.equal(await readFile(join(directory, "reqs.json"), "utf8"), config);
+  assert.equal(
+    await readFile(join(requestsDirectory, "keep.json"), "utf8"),
+    request,
+  );
+  assert.equal(
+    await readFile(join(directory, ".gitignore"), "utf8"),
+    "node_modules/\n/reqs.json\nrequests/\n.reqs/\n",
+  );
+});
+
+test("rejects conflicting init paths before creating files", async (context) => {
+  const directory = await createTempDirectory(context);
+  await writeFile(join(directory, "requests"), "not a directory");
+
+  const result = await runCli(["init"], {}, directory);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /Expected .*requests to be a directory/);
+  await assert.rejects(
+    readFile(join(directory, "reqs.json"), "utf8"),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    readFile(join(directory, ".gitignore"), "utf8"),
+    /ENOENT/,
+  );
+});
+
+test("reports extra init arguments", async (context) => {
+  const directory = await createTempDirectory(context);
+  const result = await runCli(["init", "extra"], {}, directory);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout.length, 0);
+  assert.equal(result.stderr, "Usage: reqs init\n");
 });
 
 test("reports invalid query override arguments", async () => {

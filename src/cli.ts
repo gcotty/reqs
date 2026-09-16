@@ -5,6 +5,7 @@ import {
   type ExecuteRequestOptions,
 } from "./core/execute-request.js";
 import { formatResponseBody } from "./core/format-response-body.js";
+import { initProject } from "./core/init-project.js";
 import { loadProjectConfigJson } from "./core/load-project-config.js";
 import { loadRequestJson } from "./core/load-request.js";
 import {
@@ -84,11 +85,51 @@ async function main(): Promise<void> {
     console.log(
       " run <file|name> [--path name=value] [--query name=value] Run a saved HTTP request",
     );
+    console.log(" init Create local project files");
     console.log(" list List saved requests");
     return;
   }
 
   const command = args[0];
+
+  if (command === "init") {
+    try {
+      if (args.length !== 1) {
+        throw new Error("Usage: reqs init");
+      }
+
+      const result = await initProject();
+
+      for (const path of result.created) {
+        console.log(`Created ${path}`);
+      }
+
+      if (
+        result.addedIgnoreEntries.length > 0 &&
+        !result.created.includes(".gitignore")
+      ) {
+        console.log("Updated .gitignore");
+      }
+
+      if (
+        result.created.length === 0 &&
+        result.addedIgnoreEntries.length === 0
+      ) {
+        console.log("Already initialized");
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      console.error(
+        message.startsWith("Usage:")
+          ? message
+          : `Failed to initialize project: ${message}`,
+      );
+      process.exitCode = 2;
+    }
+
+    return;
+  }
 
   if (command === "list") {
     try {
