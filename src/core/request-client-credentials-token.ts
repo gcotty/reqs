@@ -7,10 +7,15 @@ export interface ClientCredentialsTokenRequest {
 
 const TOKEN_TIMEOUT_MS = 10_000;
 
+export interface ClientCredentialsToken {
+  accessToken: string;
+  expiresIn: number | undefined;
+}
+
 export async function requestClientCredentialsToken(
   request: ClientCredentialsTokenRequest,
   fetcher: typeof fetch = fetch,
-): Promise<string> {
+): Promise<ClientCredentialsToken> {
   let tokenUrl: URL;
 
   try {
@@ -81,5 +86,18 @@ export async function requestClientCredentialsToken(
     throw new Error("OAuth token response was missing a Bearer access token");
   }
 
-  return accessToken;
+  const lifetime = fields["expires_in"];
+  const expiresIn =
+    typeof lifetime === "number" ||
+    (typeof lifetime === "string" && /^\d+(?:\.\d+)?$/u.test(lifetime))
+      ? Number(lifetime)
+      : undefined;
+
+  return {
+    accessToken,
+    expiresIn:
+      expiresIn !== undefined && Number.isFinite(expiresIn) && expiresIn > 0
+        ? expiresIn
+        : undefined,
+  };
 }

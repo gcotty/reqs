@@ -51,13 +51,13 @@ Inspected on 2026-09-16:
 | `src/test/format-response-body.test.ts` | Covers standard and structured JSON media types plus preservation of non-JSON and malformed bodies |
 | `src/test/*project-config.test.ts`, `src/test/resolve-auth.test.ts`, `src/test/request-client-credentials-token.test.ts`, and `src/test/apply-resolved-auth.test.ts` | Cover project config discovery and validation, environment and Key Vault secret resolution, OAuth token exchange, failure sanitization, and credential application |
 
-The latest TypeScript compilation and full automated suite passed: ten test files declare 64 passing tests. Transport and CLI tests use temporary loopback servers or mocked token responses rather than public network services. The user also confirmed that two live requests using the new OAuth profiles returned successfully; this is a manual usage check, not part of the automated suite.
+The latest TypeScript compilation and full automated suite passed: ten test files declare 68 passing tests. Transport and CLI tests use temporary loopback servers or mocked token and HTTPS resource responses rather than public network services. The user also confirmed that two live requests using the OAuth profiles returned successfully; this is a manual usage check, not part of the automated suite.
 
 Tracked configuration and request examples contain placeholders rather than live identifiers. The ignored root `reqs.json` and ignored `requests/` directory hold local working configuration and requests. An API-key request also succeeded in an earlier live manual check.
 
 The earlier loader typo has been corrected to `loadRequestJson`. The validator's type-only import now uses `./request.js`, consistent with the project's Node ESM import convention.
 
-Authentication works through named bearer, API-key, and OAuth 2.0 client-credentials profiles. Secret references use environment variables or `{ "kv": "secret-name" }`. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. OAuth profiles currently exchange the resolved client ID and secret for a Bearer token on every run. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials. Persistent token caching is the final v1 gate.
+Authentication works through named bearer, API-key, and OAuth 2.0 client-credentials profiles. Secret references use environment variables or `{ "kv": "secret-name" }`. A Key Vault reference executes the fixed `kv` helper without a shell, so `kv` must be a real executable available on `PATH`; a shell alias or function alone is not visible to `reqs`. The resolver captures stdout in memory, removes trailing line endings, and rejects command failures or empty values without exposing provider output. OAuth profiles reuse valid tokens from private files in the project's ignored `.reqs/` directory. The CLI finds the nearest ancestor `reqs.json`, validates it, resolves the selected profile, and passes the resulting header or query credential to the executor. Auth application replaces conflicting saved credentials.
 
 The executor still deliberately rejects configured `vars` fields instead of silently sending unresolved values. It supports direct URLs; headers; repeated saved query values; temporary CLI query overrides; and JSON, text, form, or file bodies. A query override replaces all matching values from both the saved URL and `query` object, or adds the parameter when it is absent. Default body content types do not override an explicit header. File body paths resolve relative to the request JSON file. GET and HEAD bodies are rejected before sending. Valid responses identified by an `application/json` or `+json` media type are pretty-printed with two-space indentation and a trailing newline; non-JSON and malformed JSON bodies remain byte-for-byte unchanged. All errors caught by `run` currently exit with code 2, including auth, network, and timeout failures.
 
@@ -108,20 +108,23 @@ TypeScript checks authored code at compile time. It does not validate JSON read 
 - Implemented: named bearer profiles using environment- or Key Vault-backed tokens.
 - Implemented: named API-key profiles targeting a configured header or query parameter.
 - Implemented: `{ "kv": "secret-name" }` references that safely execute the fixed `kv` helper and retain resolved secrets only in process memory.
-- Implemented: provider-neutral OAuth 2.0 client credentials with a configurable HTTPS token URL and scope, environment-variable or Key Vault client ID and secret references, and a Bearer token fetched for each run.
+- Implemented: provider-neutral OAuth 2.0 client credentials with a configurable HTTPS token URL and scope, environment-variable or Key Vault client ID and secret references, and persistent token caching.
 - Implemented: project config discovery, validation, secret resolution, credential application, and end-to-end CLI integration tests.
 
-## Final v1 gate: OAuth token cache
+## OAuth token cache
 
-`reqs run` starts a new process for each request, so an in-memory cache would
-not help. Store client-credentials access tokens under the project's ignored
-`.reqs/` directory with private file permissions. Reuse a token only while its
-`expires_in` lifetime remains valid, with a short margin before expiry. Scope
-the cache by project and profile, and invalidate it when the token URL, scope,
-client ID, or client secret changes. Fetch a fresh token on a cache miss or
-near expiry. If the token response has no usable `expires_in`, use the token
-for that run without caching it. Keep tokens and credentials out of errors and
-tracked files. Test reuse across separate CLI runs and renewal after expiry.
+`reqs run` starts a new process for each request. Client-credentials access
+tokens with a usable `expires_in` are cached under the project's ignored
+`.reqs/` directory with private directory and file permissions. A token is
+reused until 30 seconds before expiry, or 10% of its lifetime for tokens that
+last less than five minutes. The cache is scoped by project and profile and
+invalidated when the token URL, scope, client ID, or client secret changes.
+Responses without a usable `expires_in` are used for one run only. Cache
+contents never include the client credentials; cache errors do not expose
+tokens or credentials. Cache filenames are SHA-256 hashes of profile names.
+Each renewal atomically replaces the profile's file; removed profiles' files
+remain until manually deleted. OAuth resource requests require HTTPS and are
+rejected before token acquisition if the URL is not HTTPS.
 
 ## Future work
 
@@ -262,7 +265,7 @@ reqs run games/get --path gameId=123
 | --- | --- |
 | Bearer | Implemented with environment-variable or Key Vault token references |
 | API key | Implemented for configured header or query placement with environment-variable or Key Vault value references |
-| OAuth 2.0 | Client credentials implemented; a token is fetched for each run |
+| OAuth 2.0 | Client credentials implemented with persistent token caching |
 
 Example secret references:
 
@@ -303,13 +306,13 @@ variable or Key Vault forms. Requests select a profile by name, such as
 }
 ```
 
-The token URL must use HTTPS and must not contain embedded credentials. Each
+The token URL and resource URL must use HTTPS; the token URL must not contain embedded credentials. Each
 run sends `grant_type=client_credentials`, `client_id`, `client_secret`, and
 `scope` as `application/x-www-form-urlencoded` data. Redirects are rejected.
 The response must be JSON with a nonempty `access_token` and Bearer
 `token_type`. The resulting `Authorization: Bearer` header is applied to the
-request. Currently each invocation obtains a new token; `expires_in` is not
-used yet. Token request errors omit credentials and response bodies. Two live
+request. Tokens with a usable `expires_in` are reused across runs until shortly
+before expiry. Token request errors omit credentials and response bodies. Two live
 OAuth requests have returned successfully with separate profile values.
 
 The `resolveAuth` API is asynchronous because Key Vault lookup and OAuth token
@@ -356,18 +359,17 @@ The current CLI lets a user:
 - Pipe or redirect the response body while status and timing go to stderr.
 - Distinguish HTTP error responses from CLI or execution errors by exit code.
 
-The automated suite passed with 64 tests, and live OAuth requests succeeded.
-V1 is complete after the persistent OAuth token cache is implemented and
-verified. File saving and response history remain outside v1.
+The automated suite passed with 68 tests, and live OAuth requests succeeded.
+V1 token caching is implemented and verified. File saving and response
+history remain outside v1.
 
 ## Resume here
 
 Read this document and inspect the current files before proposing the next change. Preserve the one-file-at-a-time review workflow.
 
 The current CLI supports the endpoint collection and testing workflow. The
-root `reqs.json` and personal `requests/` directory are ignored; tracked
-examples contain placeholders only. OAuth profiles obtain a fresh token for
-each run. Implement persistent OAuth token caching as the final v1 gate, then
-consider file saving and opt-in response history. Shell redirection already
-saves stdout, so `--output` should be added only if its file handling provides
-a clear benefit.
+root `reqs.json`, personal `requests/` directory, and token cache `.reqs/`
+are ignored; tracked examples contain placeholders only. OAuth profiles reuse
+tokens until shortly before expiry. Consider file saving and opt-in response
+history next. Shell redirection already saves stdout, so `--output` should be
+added only if its file handling provides a clear benefit.

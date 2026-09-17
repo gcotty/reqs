@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { dirname, join } from "node:path";
+
 import {
   executeRequest,
   type ExecuteRequestOptions,
@@ -180,7 +182,18 @@ async function main(): Promise<void> {
       }
 
       if (request.auth !== undefined) {
-        executeOptions.auth = await resolveAuth(request.auth, config);
+        if (
+          config.auth?.[request.auth]?.type === "oauth2ClientCredentials" &&
+          new URL(request.url).protocol !== "https:"
+        ) {
+          throw new Error("OAuth requests require an HTTPS URL");
+        }
+
+        executeOptions.auth = await resolveAuth(request.auth, config, {
+          ...(loadedConfig.filePath === undefined
+            ? {}
+            : { tokenCacheDirectory: join(dirname(loadedConfig.filePath), ".reqs") }),
+        });
       }
 
       const { response, body, durationMs } = await executeRequest(

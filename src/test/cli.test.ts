@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -685,27 +685,10 @@ test("loads and applies a named API-key auth profile", async (context) => {
 });
 
 test("runs a request with OAuth client credentials", async (context) => {
-  let receivedAuthorization: string | undefined;
-
-  const server = createServer((request, response) => {
-    receivedAuthorization = request.headers.authorization;
-    response.writeHead(200);
-    response.end("authenticated");
-  });
-
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  context.after(() => closeServer(server));
-
-  const address = server.address();
-
-  if (address === null || typeof address === "string") {
-    throw new Error("Test server did not listen on a TCP port");
-  }
-
   const directory = await createTempDirectory(context);
   const requestFilePath = join(directory, "request.json");
   const tokenRecordPath = join(directory, "token-request.json");
+  const authorizationRecordPath = join(directory, "authorization.txt");
   const fetchPreloadPath = join(directory, "mock-fetch.cjs");
 
   await writeFile(
@@ -728,7 +711,7 @@ test("runs a request with OAuth client credentials", async (context) => {
     JSON.stringify({
       version: 1,
       method: "GET",
-      url: `http://127.0.0.1:${address.port}/resource`,
+      url: "https://api.example.test/resource",
       auth: "example",
     }),
   );
@@ -751,6 +734,10 @@ globalThis.fetch = async (input, init) => {
       token_type: "Bearer",
     }));
   }
+  if (String(input) === "https://api.example.test/resource") {
+    writeFileSync(process.env.REQS_AUTH_RECORD, new Headers(init.headers).get("authorization"));
+    return new Response("authenticated", { statusText: "OK" });
+  }
   return originalFetch(input, init);
 };
 `,
@@ -761,13 +748,14 @@ globalThis.fetch = async (input, init) => {
     EXAMPLE_CLIENT_SECRET: "example-secret",
     NODE_OPTIONS: `--require=${fetchPreloadPath}`,
     REQS_TOKEN_RECORD: tokenRecordPath,
+    REQS_AUTH_RECORD: authorizationRecordPath,
   };
   const result = await runCli(["run", requestFilePath], environment);
 
   assert.equal(result.exitCode, 0);
   assert.equal(result.stdout.toString("utf8"), "authenticated");
   assert.match(result.stderr, /^200 OK \(\d+ ms\)\n$/u);
-  assert.equal(receivedAuthorization, "Bearer issued-token");
+  assert.equal(await readFile(authorizationRecordPath, "utf8"), "Bearer issued-token");
 
   const tokenRequest = JSON.parse(await readFile(tokenRecordPath, "utf8")) as {
     method: string;
@@ -783,6 +771,24 @@ globalThis.fetch = async (input, init) => {
     scope: "api.read",
   });
 
+  await writeFile(requestFilePath, JSON.stringify({
+    version: 1,
+    method: "GET",
+    url: "http://api.example.test/resource",
+    auth: "example",
+  }));
+  const insecure = await runCli(["run", requestFilePath], environment);
+  assert.equal(insecure.exitCode, 2);
+  assert.equal(insecure.stderr, "Failed to run request: OAuth requests require an HTTPS URL\n");
+  assert.equal(await readFile(tokenRecordPath, "utf8"), JSON.stringify(tokenRequest));
+
+  await writeFile(requestFilePath, JSON.stringify({
+    version: 1,
+    method: "GET",
+    url: "https://api.example.test/resource",
+    auth: "example",
+  }));
+
   const failure = await runCli(["run", requestFilePath], {
     ...environment,
     REQS_TOKEN_STATUS: "401",
@@ -795,4 +801,99 @@ globalThis.fetch = async (input, init) => {
     "Failed to run request: OAuth token request failed with status 401\n",
   );
   assert.doesNotMatch(failure.stderr, /example-secret|sensitive token body/u);
+});
+
+test("reuses and renews cached OAuth tokens across CLI runs", async (context) => {
+  const directory = await createTempDirectory(context);
+  const requestFilePath = join(directory, "request.json");
+  const tokenRecordPath = join(directory, "token-calls.txt");
+  const authorizationRecordPath = join(directory, "authorizations.txt");
+  const fetchPreloadPath = join(directory, "mock-fetch.cjs");
+  await writeFile(join(directory, "reqs.json"), JSON.stringify({
+    version: 1,
+    auth: {
+      example: {
+        type: "oauth2ClientCredentials",
+        tokenUrl: "https://auth.example.test/connect/token",
+        scope: "api.read",
+        clientId: { env: "EXAMPLE_CLIENT_ID" },
+        clientSecret: { env: "EXAMPLE_CLIENT_SECRET" },
+      },
+    },
+  }));
+  await writeFile(requestFilePath, JSON.stringify({
+    version: 1,
+    method: "GET",
+    url: "https://api.example.test/resource",
+    auth: "example",
+  }));
+  await writeFile(fetchPreloadPath, `const { appendFileSync } = require("node:fs");
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  if (String(input) === "https://auth.example.test/connect/token") {
+    appendFileSync(process.env.REQS_TOKEN_RECORD, "call\\n");
+    if (process.env.REQS_TOKEN_STATUS === "401") {
+      return new Response("sensitive token body", { status: 401 });
+    }
+    return new Response(JSON.stringify({
+      access_token: process.env.REQS_ISSUED_TOKEN,
+      token_type: "Bearer",
+      expires_in: 3600,
+    }));
+  }
+  if (String(input) === "https://api.example.test/resource") {
+    appendFileSync(process.env.REQS_AUTH_RECORD, new Headers(init.headers).get("authorization") + "\\n");
+    return new Response("ok");
+  }
+  return originalFetch(input, init);
+};
+`);
+
+  const environment = {
+    EXAMPLE_CLIENT_ID: "example-id",
+    EXAMPLE_CLIENT_SECRET: "example-secret",
+    NODE_OPTIONS: `--require=${fetchPreloadPath}`,
+    REQS_TOKEN_RECORD: tokenRecordPath,
+    REQS_AUTH_RECORD: authorizationRecordPath,
+    REQS_ISSUED_TOKEN: "first-token",
+  };
+  const first = await runCli(["run", requestFilePath], environment);
+  assert.equal(first.exitCode, 0);
+
+  const cacheDirectory = join(directory, ".reqs");
+  const cacheFiles = await readdir(cacheDirectory);
+  assert.equal(cacheFiles.length, 1);
+  const cacheFilePath = join(cacheDirectory, cacheFiles[0]!);
+  assert.equal((await stat(cacheDirectory)).mode & 0o077, 0);
+  assert.equal((await stat(cacheFilePath)).mode & 0o077, 0);
+  const cached = await readFile(cacheFilePath, "utf8");
+  assert.doesNotMatch(cached, /example-secret|example-id/u);
+
+  const second = await runCli(["run", requestFilePath], {
+    ...environment,
+    REQS_ISSUED_TOKEN: "second-token",
+    REQS_TOKEN_STATUS: "401",
+  });
+  assert.equal(second.exitCode, 0);
+  assert.equal(await readFile(tokenRecordPath, "utf8"), "call\n");
+
+  const staleEntry = JSON.parse(cached) as Record<string, unknown>;
+  staleEntry["refreshAt"] = Date.now() - 1;
+  await writeFile(cacheFilePath, JSON.stringify(staleEntry));
+  const third = await runCli(["run", requestFilePath], {
+    ...environment,
+    REQS_ISSUED_TOKEN: "renewed-token",
+  });
+  assert.equal(third.exitCode, 0);
+  assert.equal(await readFile(tokenRecordPath, "utf8"), "call\ncall\n");
+
+  const fourth = await runCli(["run", requestFilePath], {
+    ...environment,
+    EXAMPLE_CLIENT_SECRET: "changed-secret",
+    REQS_ISSUED_TOKEN: "changed-token",
+  });
+  assert.equal(fourth.exitCode, 0);
+  assert.equal(await readFile(tokenRecordPath, "utf8"), "call\ncall\ncall\n");
+  assert.equal(await readFile(authorizationRecordPath, "utf8"),
+    "Bearer first-token\nBearer first-token\nBearer renewed-token\nBearer changed-token\n");
 });

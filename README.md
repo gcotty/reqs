@@ -60,7 +60,9 @@ Add a profile to `reqs.json`:
 }
 ```
 
-Set those environment variables and add `"auth": "example"` to a saved request. `reqs run` fetches a Bearer token for each run.
+Set those environment variables and add `"auth": "example"` to a saved request. `reqs run` stores tokens with an `expires_in` lifetime in the project's ignored `.reqs/` directory and reuses them across runs. It fetches a new token shortly before expiry or when the profile's token URL, scope, client ID, or client secret changes. Tokens without a usable `expires_in` are used once and are not cached.
+
+OAuth requests require an HTTPS resource URL. Each profile has one cache file, named with a SHA-256 hash of the profile name. Renewals replace that file; cache files for removed profiles remain until you delete them from `.reqs/`.
 
 ## Development
 

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type { ProjectConfig } from "../core/project-config.js";
@@ -93,6 +96,7 @@ test("resolves OAuth client credentials into a Bearer header", async () => {
     location: "header",
     name: "Authorization",
     value: "Bearer issued-token",
+    requiresHttps: true,
   });
 });
 
@@ -111,6 +115,32 @@ test("does not request an OAuth token when credentials are missing", async () =>
   );
 
   assert.equal(fetchCalled, false);
+});
+
+test("does not cache OAuth tokens without a usable lifetime", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "reqs-auth-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  let tokenRequests = 0;
+  const options = {
+    env: { EXAMPLE_CLIENT_ID: "example-id" },
+    resolveKeyVaultSecret: async () => "example-secret",
+    fetcher: async () => {
+      tokenRequests += 1;
+      return new Response(JSON.stringify({
+        access_token: `token-${tokenRequests}`,
+        token_type: "Bearer",
+      }));
+    },
+    tokenCacheDirectory: join(directory, ".reqs"),
+  };
+
+  const first = await resolveAuth("oauth", config, options);
+  const second = await resolveAuth("oauth", config, options);
+
+  assert.equal(first.value, "Bearer token-1");
+  assert.equal(second.value, "Bearer token-2");
+  assert.equal(tokenRequests, 2);
+  await assert.rejects(readdir(options.tokenCacheDirectory), { code: "ENOENT" });
 });
 
 test("resolves an API key into a configured header", async () => {

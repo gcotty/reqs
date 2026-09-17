@@ -36,13 +36,27 @@ test("sends client credentials as form data and returns a Bearer token", async (
       assert.match(init.body.toString(), /client_secret=secret%26value%3D1/u);
 
       return new Response(
-        JSON.stringify({ access_token: "example-token", token_type: "bearer" }),
+        JSON.stringify({ access_token: "example-token", token_type: "bearer", expires_in: 3600 }),
         { status: 200 },
       );
     },
   );
 
-  assert.equal(token, "example-token");
+  assert.deepStrictEqual(token, { accessToken: "example-token", expiresIn: 3600 });
+});
+
+test("leaves tokens without a usable lifetime uncached", async () => {
+  for (const expiresIn of [undefined, 0, -1, "unknown", null]) {
+    const token = await requestClientCredentialsToken(request, async () =>
+      new Response(JSON.stringify({
+        access_token: "example-token",
+        token_type: "Bearer",
+        expires_in: expiresIn,
+      })),
+    );
+
+    assert.deepStrictEqual(token, { accessToken: "example-token", expiresIn: undefined });
+  }
 });
 
 test("rejects token URLs that are not HTTPS or contain credentials", async () => {

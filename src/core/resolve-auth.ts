@@ -8,6 +8,11 @@ import type {
   ProjectConfig,
   SecretReference,
 } from "./project-config.js";
+import {
+  readCachedToken,
+  tokenFingerprint,
+  writeCachedToken,
+} from "./oauth-token-cache.js";
 import { requestClientCredentialsToken } from "./request-client-credentials-token.js";
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +22,7 @@ export type ResolvedAuth =
       location: "header";
       name: string;
       value: string;
+      requiresHttps?: true;
     }
   | {
       location: "query";
@@ -28,6 +34,7 @@ export interface ResolveAuthOptions {
   env?: Readonly<Record<string, string | undefined>>;
   resolveKeyVaultSecret?: (secretName: string) => Promise<string>;
   fetcher?: typeof fetch;
+  tokenCacheDirectory?: string;
 }
 
 function assertNever(value: never): never {
@@ -160,20 +167,43 @@ export async function resolveAuth(
         env,
         keyVaultResolver,
       );
-      const accessToken = await requestClientCredentialsToken(
-        {
-          tokenUrl: profile.tokenUrl,
-          scope: profile.scope,
-          clientId,
-          clientSecret,
-        },
-        options.fetcher,
-      );
+      const tokenRequest = {
+        tokenUrl: profile.tokenUrl,
+        scope: profile.scope,
+        clientId,
+        clientSecret,
+      };
+      const cacheDirectory = options.tokenCacheDirectory;
+      const fingerprint = tokenFingerprint(tokenRequest);
+      let accessToken = cacheDirectory === undefined
+        ? undefined
+        : await readCachedToken(cacheDirectory, profileName, fingerprint);
+
+      if (accessToken === undefined) {
+        const issuedAt = Date.now();
+        const issuedToken = await requestClientCredentialsToken(
+          tokenRequest,
+          options.fetcher,
+        );
+        accessToken = issuedToken.accessToken;
+
+        if (cacheDirectory !== undefined) {
+          await writeCachedToken(
+            cacheDirectory,
+            profileName,
+            fingerprint,
+            accessToken,
+            issuedAt,
+            issuedToken.expiresIn,
+          );
+        }
+      }
 
       return {
         location: "header",
         name: "Authorization",
         value: `Bearer ${accessToken}`,
+        requiresHttps: true,
       };
     }
 

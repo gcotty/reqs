@@ -123,6 +123,15 @@ export async function executeRequest(
   }
 
   const url = new URL(request.url);
+
+  if (
+    options.auth?.location === "header" &&
+    options.auth.requiresHttps === true &&
+    url.protocol !== "https:"
+  ) {
+    throw new Error("OAuth requests require an HTTPS URL");
+  }
+
   const headers = new Headers(request.headers);
 
   applyPathOverrides(url, options.pathOverrides);

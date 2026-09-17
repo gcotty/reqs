@@ -158,6 +158,28 @@ test("rejects missing, unknown, and invalid path values", async () => {
   }
 });
 
+test("rejects an HTTP resource URL for OAuth bearer auth", async () => {
+  await assert.rejects(
+    executeRequest(
+      {
+        version: 1,
+        method: "GET",
+        url: "http://api.example.test/resource",
+        auth: "oauth",
+      },
+      {
+        auth: {
+          location: "header",
+          name: "Authorization",
+          value: "Bearer issued-token",
+          requiresHttps: true,
+        },
+      },
+    ),
+    { message: "OAuth requests require an HTTPS URL" },
+  );
+});
+
 test("sends each supported request body", async (context) => {
   interface RecordedRequest {
     body: Buffer;
